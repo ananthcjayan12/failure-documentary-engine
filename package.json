@@ -1,0 +1,16 @@
+{
+  "name": "failure-documentary-render-runtime",
+  "private": true,
+  "version": "0.5.0",
+  "description": "Pinned HyperFrames runtime for Failure Investigation Studio",
+  "scripts": {
+    "doctor": "hyperframes doctor",
+    "preview": "hyperframes preview --port 3002",
+    "render": "hyperframes render"
+  },
+  "dependencies": {
+    "hyperframes": "0.7.62",
+    "gsap": "3.13.0"
+  },
+  "engines": {"node": ">=22"}
+}

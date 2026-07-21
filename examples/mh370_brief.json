@@ -1,0 +1,11 @@
+{
+  "project_id": "mh370",
+  "title": "MH370: The Plane That Vanished",
+  "topic": "The disappearance of Malaysia Airlines Flight MH370",
+  "target_duration_seconds": 480,
+  "tone": ["investigative", "suspenseful", "respectful", "technically credible"],
+  "maximum_master_assets": 28,
+  "master_video_duration_seconds": 5,
+  "language": "English",
+  "audience": "General international audience"
+}

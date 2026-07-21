@@ -1,0 +1,15 @@
+# Detailed narration script task
+
+Project brief:
+{{ brief.model_dump_json(indent=2) }}
+
+Approved structure:
+{{ structure.model_dump_json(indent=2) }}
+
+Claim ledger:
+{{ research.model_dump(mode="json")["claims"] | tojson(indent=2) }}
+
+Write a complete narration with approximately 125–145 spoken words per minute. Use shorter sentences
+for suspense and clearer measured sentences for technical explanations. Every factual segment should
+link to relevant claim_ids. Distinguish confirmed facts, official findings, inference, and theories.
+Use pauses before important reveals. Return JSON only matching DocumentaryScript.

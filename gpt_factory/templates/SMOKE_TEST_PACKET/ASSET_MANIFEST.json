@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "project": {
+    "project_id": "factory-smoke-test",
+    "title": "Documentary Image Factory Smoke Test"
+  },
+  "factory_contract": {
+    "asset_count": 2,
+    "maximum_retry_per_asset": 1,
+    "generate_one_image_per_asset": true,
+    "never_regenerate_passed_assets": true,
+    "target_aspect_ratio": "16:9",
+    "packaging_filename": "factory-smoke-test_images_approved.zip"
+  },
+  "batches": [
+    {"batch_id": "B00_ANCHORS", "asset_ids": ["A01"]},
+    {"batch_id": "B01_ATMOSPHERE", "asset_ids": ["A02"]}
+  ],
+  "assets": [
+    {
+      "asset_id": "A01",
+      "title": "Investigation vessel at night",
+      "family": "hero",
+      "priority": "essential",
+      "is_continuity_anchor": true,
+      "continuity_reference_asset_id": "A01",
+      "expected_filename": "A01_investigation_vessel_at_night_v01.png",
+      "acceptance_checks": [
+        "One clean 16:9 landscape image",
+        "No text or watermark",
+        "Technically credible vessel geometry",
+        "Safe central composition for later crop"
+      ],
+      "complete_prompt": "A restrained high-end investigation documentary reconstruction of a modern civilian ocean-search vessel at night, moving slowly through realistic dark seas, viewed from a distant low three-quarter angle. Deep navy and steel-blue palette, subtle amber deck lights, photorealistic, technically credible, central 80% safe composition, no text, no logos, no dramatic storm, one image only.",
+      "status": "pending",
+      "version": 0,
+      "qc": null
+    },
+    {
+      "asset_id": "A02",
+      "title": "Deep ocean atmospheric plate",
+      "family": "atmosphere",
+      "priority": "essential",
+      "is_continuity_anchor": false,
+      "continuity_reference_asset_id": "A01",
+      "expected_filename": "A02_deep_ocean_atmospheric_plate_v01.png",
+      "acceptance_checks": [
+        "One clean 16:9 landscape image",
+        "No text or watermark",
+        "Locked-camera loop-friendly environment",
+        "No one-time event"
+      ],
+      "complete_prompt": "A locked-camera deep-ocean atmospheric plate for a premium investigation documentary: near-black blue water, suspended particles, a subtle distant search beam, realistic depth and pressure, no vehicle, no creature, no text, no watermark, central 80% safe composition, one image only.",
+      "status": "pending",
+      "version": 0,
+      "qc": null
+    }
+  ]
+}

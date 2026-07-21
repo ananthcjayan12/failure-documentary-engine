@@ -1,0 +1,14 @@
+# Documentary structure task
+
+Project brief:
+{{ brief.model_dump_json(indent=2) }}
+
+Research dossier:
+{{ research.model_dump_json(indent=2) }}
+
+Create a suspenseful but respectful documentary structure before writing prose. Use 8–12 chapters.
+Every chapter needs a narrative purpose, opening question, key information, reveal, ending hook, and
+non-overlapping target timing. The total must be approximately {{ brief.target_duration_seconds }} seconds.
+Do not present theories as established facts.
+
+Return JSON only, matching the DocumentaryStructure schema.

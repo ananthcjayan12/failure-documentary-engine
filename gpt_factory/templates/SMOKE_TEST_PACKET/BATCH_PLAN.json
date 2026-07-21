@@ -1,0 +1,7 @@
+{
+  "project_id": "factory-smoke-test",
+  "batches": [
+    {"batch_id": "B00_ANCHORS", "asset_ids": ["A01"]},
+    {"batch_id": "B01_ATMOSPHERE", "asset_ids": ["A02"]}
+  ]
+}

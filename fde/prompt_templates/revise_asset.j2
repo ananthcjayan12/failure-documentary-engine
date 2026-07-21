@@ -1,0 +1,13 @@
+# Revise one master asset prompt
+
+Original asset:
+{{ asset.model_dump_json(indent=2) }}
+
+Reviewer instruction:
+{{ instruction }}
+
+Preserve:
+{{ preserve | join(", ") }}
+
+Rewrite only the image prompt. Keep the global channel style, continuity, 16:9 framing, realistic
+technical details, and negative instructions. Return plain prompt text only.

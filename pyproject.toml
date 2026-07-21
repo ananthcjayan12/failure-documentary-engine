@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "failure-documentary-engine"
+version = "0.5.0"
+description = "Human-reviewed documentary production pipeline for failure investigations"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Failure Documentary Engine"}]
+dependencies = [
+  "pydantic>=2.7",
+  "typer>=0.12",
+  "rich>=13.7",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "jinja2>=3.1",
+  "pillow>=10.3",
+  "python-multipart>=0.0.9"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[project.scripts]
+fde = "fde.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["fde*"]
+
+[tool.setuptools.package-data]
+fde = ["prompt_templates/*.j2", "studio/static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100

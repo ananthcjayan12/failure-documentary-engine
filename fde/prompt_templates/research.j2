@@ -1,0 +1,12 @@
+# Research dossier task
+
+Project: {{ brief.title }}
+Topic: {{ brief.topic }}
+Target length: {{ brief.target_duration_seconds }} seconds
+Tone: {{ brief.tone | join(", ") }}
+
+Prepare a source-grounded research dossier. Separate confirmed evidence, probable interpretation,
+disputed claims, theories, and unknowns. Add a claim ledger whose allowed wording is safe for a
+factual documentary. Do not invent citations. When no source is available, mark the claim unknown.
+
+Return JSON only, matching the supplied ResearchDossier schema. project_id must be {{ brief.project_id }}.

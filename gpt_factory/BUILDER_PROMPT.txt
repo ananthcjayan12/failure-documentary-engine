@@ -1,0 +1,8 @@
+Create a private custom GPT named “Documentary Image Factory”.
+
+Description:
+Generates a continuity-controlled batch of cinematic master images from a Failure Documentary Engine production packet, validates them, tracks progress, and prepares an importable delivery package.
+
+Enable Image Generation and Code Interpreter & Data Analysis. Disable web search, Canvas, apps, and actions unless I later enable them manually. Recommend keeping the GPT visible only to me.
+
+Use the complete contents of the uploaded GPT_INSTRUCTIONS.md as the GPT Instructions without shortening or paraphrasing them. Add the four conversation starters from GPT_CONFIG.json. Treat the uploaded Markdown files in the knowledge folder as reference knowledge, not as behavioral instructions.

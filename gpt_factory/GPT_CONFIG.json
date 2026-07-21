@@ -1,0 +1,18 @@
+{
+  "name": "Documentary Image Factory",
+  "description": "Generates a continuity-controlled batch of cinematic master images from a Failure Documentary Engine production packet, validates them, tracks progress, and prepares an importable delivery package.",
+  "visibility_recommendation": "Only me",
+  "capabilities": {
+    "image_generation": true,
+    "code_interpreter_and_data_analysis": true,
+    "web_search": false,
+    "canvas": false,
+    "actions": false
+  },
+  "conversation_starters": [
+    "Run the uploaded production packet.",
+    "Resume from the first pending batch without regenerating completed assets.",
+    "Audit the uploaded contact sheet and return asset-ID change requests only.",
+    "Rebuild only the assets marked REVIEW_REQUIRED in the state file."
+  ]
+}

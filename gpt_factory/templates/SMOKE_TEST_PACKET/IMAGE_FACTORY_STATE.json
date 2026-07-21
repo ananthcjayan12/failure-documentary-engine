@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "project_id": "factory-smoke-test",
+  "completed_asset_ids": [],
+  "pending_asset_ids": ["A01", "A02"],
+  "review_required_asset_ids": [],
+  "current_batch_id": "B00_ANCHORS"
+}

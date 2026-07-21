@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+projects/*/08_generated_images/inbox/*
+projects/*/10_generated_videos/inbox/*
+projects/*/13_preview/*.mp4
+projects/*/14_final/*.mp4
+!projects/.gitkeep
+node_modules/
+package-lock.json
+projects/*/13_preview/composition/
+projects/*/14_final/composition/
