@@ -52,3 +52,5 @@ jobs:
           python -m pip install -e ".[dev]"
           python -m compileall -q fde tests
           pytest -q
+
+# Triggered after the workflow existed on the branch so GitHub Actions can apply the staged source.
