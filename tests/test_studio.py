@@ -20,12 +20,15 @@ def test_studio_bootstrap_and_modern_routes(tmp_path: Path):
     payload = bootstrap.json()
     assert payload["projects"][0]["project_id"] == "demo"
     assert len(payload["stage_definitions"]) == 8
+    assert [stage["id"] for stage in payload["stage_definitions"]] == [
+        "story_setup", "narration", "voice", "shots", "images", "animatic", "videos", "final_preview",
+    ]
 
     project = client.get("/api/projects/demo").json()
-    assert project["state"] == "IMAGE_REVIEW"
+    assert project["state"] == "IMAGES_REVIEW"
     review_stages = [stage["id"] for stage in project["stages"] if stage["status"] == "review"]
-    assert review_stages == ["image_review"]
-    assert project["next_action"]["id"] == "review_images"
+    assert review_stages == ["images"]
+    assert project["next_action"]["id"] == "approve_images"
 
     assert client.get("/").status_code == 200
     assert client.get("/static/app.js").status_code == 200
@@ -75,6 +78,7 @@ def test_studio_background_job_is_resumable(tmp_path: Path):
     assert project["next_action"]["id"] == "structure"
     assert "Created ResearchDossier" in client.get("/api/projects/job-test/logs").json()["log"]
 
+
 def test_studio_rejects_project_path_traversal(tmp_path: Path):
     client = TestClient(create_app(tmp_path / "projects"))
     response = client.get("/api/projects/..%2Fsecrets")
@@ -82,7 +86,6 @@ def test_studio_rejects_project_path_traversal(tmp_path: Path):
 
     artifact = client.get("/artifacts/..%2Fsecrets/file.txt")
     assert artifact.status_code == 404
-
 
 
 def test_orchestrator_routes_profiles_and_prompt_packs(tmp_path: Path):
