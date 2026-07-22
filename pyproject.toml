@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "failure-documentary-engine"
-version = "0.5.0"
-description = "Human-reviewed documentary production pipeline for failure investigations"
+version = "0.6.0"
+description = "Audio-first documentary production pipeline for failure investigations"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -19,11 +19,13 @@ dependencies = [
   "jinja2>=3.1",
   "pillow>=10.3",
   "python-multipart>=0.0.9",
-  "python-dotenv>=1.0"
+  "python-dotenv>=1.0",
+  "google-genai>=1.0"
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.5", "httpx2"]
+dev = ["pytest>=8.0", "ruff>=0.5", "httpx"]
+alignment = ["openai-whisper>=20231117"]
 
 [project.scripts]
 fde = "fde.cli:app"
