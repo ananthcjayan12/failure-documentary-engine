@@ -23,6 +23,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cat > /tmp/chunks.sha256 <<'EOF'
+          8fdeb0507800b2a8bb373709f28c9a727104ad2f0f439be7b63ff450b82fa4a3  .github/fde-bootstrap/chunk-00
+          f7688a3d24dc84e1f5480f8ae16c593db664fe1c18d1b72ea07bbf5a606d0197  .github/fde-bootstrap/chunk-01
+          124787848456e018a97243ca23f6b19b1cc336c388d3fe5ff92788d5e653f838  .github/fde-bootstrap/chunk-02
+          0a65856cf2d05300f58d47f1499ef2064d2e09d8895afec0439520dca7f491a1  .github/fde-bootstrap/chunk-03
+          cc0dc140213b16d4c9d3d7b09a30ae32831103a9e0a0e00e1a5b495c19e5fc5a  .github/fde-bootstrap/chunk-04
+          bd4ccaf36f37bac5ac489e3475d39cb12ed5bf86662d5f5adf604a7554c70b7a  .github/fde-bootstrap/chunk-05
+          61b866a43dcf26f5faac3d3a84174092085499bfa98b0ee8271004274b694de1  .github/fde-bootstrap/chunk-06
+          EOF
+          sha256sum --check --strict /tmp/chunks.sha256
           cat .github/fde-bootstrap/chunk-* > /tmp/fde-v06.b64
           base64 --decode /tmp/fde-v06.b64 > /tmp/fde-v06-changes.tar.gz
           echo 'bfb751fd2ef3300ac7f73ae048fbcdae165fdabd3d8af70b14530d02b643a5da  /tmp/fde-v06-changes.tar.gz' | sha256sum --check --strict
