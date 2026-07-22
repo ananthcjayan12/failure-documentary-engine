@@ -1,19 +1,17 @@
 name: Apply FDE v0.6 implementation
 
 on:
-  push:
-    branches:
-      - feature/narration-live-jobs-sfx
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   apply-source:
-    if: github.actor != 'github-actions[bot]'
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'feature/narration-live-jobs-sfx'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,10 +23,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/fde-bootstrap/part-* > /tmp/fde-v06.b64
-          base64 --decode /tmp/fde-v06.b64 > /tmp/fde-v06.tar.gz
-          echo '70f5a924d210a7328f2132058e44266273ddafe763aff5121759a8296e217ca7  /tmp/fde-v06.tar.gz' | sha256sum --check --strict
-          tar -xzf /tmp/fde-v06.tar.gz -C .
+          cat .github/fde-bootstrap/chunk-* > /tmp/fde-v06.b64
+          base64 --decode /tmp/fde-v06.b64 > /tmp/fde-v06-changes.tar.gz
+          echo 'bfb751fd2ef3300ac7f73ae048fbcdae165fdabd3d8af70b14530d02b643a5da  /tmp/fde-v06-changes.tar.gz' | sha256sum --check --strict
+          tar -xzf /tmp/fde-v06-changes.tar.gz -C .
 
       - name: Run validation
         shell: bash
@@ -40,7 +38,7 @@ jobs:
           node --check fde/studio/static/app.js
           PYTHONPATH=. pytest -q
 
-      - name: Publish extracted implementation
+      - name: Publish actual source files
         shell: bash
         run: |
           set -euo pipefail
@@ -49,5 +47,9 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
+          if git diff --cached --quiet; then
+            echo 'No source changes to publish.'
+            exit 0
+          fi
           git commit -m 'feat: add narration-first production, live jobs, and sound design'
           git push origin HEAD:feature/narration-live-jobs-sfx
