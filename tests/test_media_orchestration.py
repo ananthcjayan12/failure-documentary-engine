@@ -134,13 +134,68 @@ def test_anthropic_api_adapter_uses_structured_output(monkeypatch):
     monkeypatch.setattr(anthropic_api, "urlopen", fake_urlopen)
     result = anthropic_api.run_structured(
         prompt="Return JSON", schema={"type": "object"}, model="claude-sonnet-5",
-        timeout=30, temperature=0.1, reasoning_effort="high",
+        timeout=30, reasoning_effort="high",
     )
 
     assert result == {"answer": "ok"}
+    structured_schema = captured["payload"]["output_config"]["format"]["schema"]
     assert captured["payload"]["output_config"]["format"]["type"] == "json_schema"
+    assert structured_schema["additionalProperties"] is False
     assert captured["payload"]["model"] == "claude-sonnet-5"
+    assert "temperature" not in captured["payload"]
+    assert set(captured["payload"]) == {"model", "max_tokens", "messages", "output_config"}
     assert captured["timeout"] == 30
+
+
+def test_anthropic_api_adapter_makes_nested_objects_strict(monkeypatch):
+    import json
+
+    from fde.providers import anthropic_api
+
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return json.dumps({"content": [{"type": "text", "text": "{}"}]}).encode()
+
+    def fake_urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data)
+        return Response()
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string", "minLength": 1}},
+                },
+            },
+            "score": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        },
+        "$defs": {"metadata": {"type": "object", "properties": {"id": {"type": "string"}}}},
+    }
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(anthropic_api, "urlopen", fake_urlopen)
+
+    anthropic_api.run_structured(prompt="Return JSON", schema=schema, model="claude-sonnet-5", timeout=30)
+
+    strict_schema = captured["payload"]["output_config"]["format"]["schema"]
+    assert strict_schema["additionalProperties"] is False
+    assert strict_schema["properties"]["items"]["items"]["additionalProperties"] is False
+    assert strict_schema["$defs"]["metadata"]["additionalProperties"] is False
+    assert "minLength" not in strict_schema["properties"]["items"]["items"]["properties"]["name"]
+    assert "exclusiveMinimum" not in strict_schema["properties"]["score"]
+    assert "maximum" not in strict_schema["properties"]["score"]
+    assert "additionalProperties" not in schema
+    assert schema["properties"]["score"]["exclusiveMinimum"] == 0
 
 
 def test_hyperframes_chunk_windows_align_to_timeline_entries():

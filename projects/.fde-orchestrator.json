@@ -26,8 +26,8 @@
       "enabled": true
     },
     "structure": {
-      "provider": "codex",
-      "model": "gpt-5.6-sol",
+      "provider": "anthropic_api",
+      "model": "claude-sonnet-5",
       "reasoning_effort": "high",
       "temperature": 0.55,
       "timeout_seconds": 1200,
@@ -37,8 +37,8 @@
       "enabled": true
     },
     "script": {
-      "provider": "codex",
-      "model": "gpt-5.6-sol",
+      "provider": "anthropic_api",
+      "model": "claude-sonnet-5",
       "reasoning_effort": "high",
       "temperature": 0.65,
       "timeout_seconds": 1800,
@@ -193,7 +193,7 @@
   },
   "providers": {
     "codex": {
-      "command_template": "/Users/ananthu/.vscode/extensions/openai.chatgpt-26.715.31925-darwin-arm64/bin/macos-aarch64/codex exec --skip-git-repo-check --model {model} --output-last-message {output} - < {prompt}",
+      "command_template": "/Users/ananthu/.vscode/extensions/openai.chatgpt-26.715.61943-darwin-arm64/bin/macos-aarch64/codex exec --skip-git-repo-check --model {model} --output-last-message {output} - < {prompt}",
       "media_command_template": "",
       "enabled": true
     },
