@@ -249,7 +249,6 @@ class RoutedAgent(StructuredAgent):
             return run_anthropic_structured(
                 prompt=prompt, schema=schema, model=item.get("model") or "claude-sonnet-5",
                 timeout=timeout,
-                temperature=float(os.environ.get("FDE_LLM_TEMPERATURE", "0.2")),
                 reasoning_effort=os.environ.get("FDE_LLM_REASONING", "medium"),
             )
         if adapter in {"command", "custom_cli"}:
