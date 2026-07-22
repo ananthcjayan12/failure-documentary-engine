@@ -19,6 +19,10 @@ jobs:
           ref: feature/narration-live-jobs-sfx
           fetch-depth: 0
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Verify and extract implementation
         shell: bash
         run: |
@@ -42,15 +46,24 @@ jobs:
           echo 'bfb751fd2ef3300ac7f73ae048fbcdae165fdabd3d8af70b14530d02b643a5da  /tmp/fde-v06-changes.tar.gz' | sha256sum --check --strict
           tar -xzf /tmp/fde-v06-changes.tar.gz -C .
 
-      - name: Run validation
+      - name: Install package and test dependencies
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
-          python -m compileall -q fde
-          node --check fde/studio/static/app.js
-          PYTHONPATH=. pytest -q
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e .
+          python -m pip install pytest ruff httpx
+
+      - name: Compile Python
+        run: python -m compileall -q fde
+
+      - name: Validate Studio JavaScript
+        run: node --check fde/studio/static/app.js
+
+      - name: Run tests
+        env:
+          PYTHONPATH: .
+        run: pytest -q
 
       - name: Publish actual source files
         shell: bash
