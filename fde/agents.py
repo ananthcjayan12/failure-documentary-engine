@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from .io import atomic_write_text, read_json, write_json
 from .providers.grok_cli import run_structured as run_grok_structured
+from .providers.anthropic_api import run_structured as run_anthropic_structured
 
 from .models import (
     Chapter,
@@ -243,6 +244,13 @@ class RoutedAgent(StructuredAgent):
                 prompt=prompt, schema=schema, destination=output_path,
                 cwd=request_dir.parent, model=item.get("model") or "authenticated-default",
                 timeout=timeout,
+            )
+        if adapter == "anthropic_api":
+            return run_anthropic_structured(
+                prompt=prompt, schema=schema, model=item.get("model") or "claude-sonnet-5",
+                timeout=timeout,
+                temperature=float(os.environ.get("FDE_LLM_TEMPERATURE", "0.2")),
+                reasoning_effort=os.environ.get("FDE_LLM_REASONING", "medium"),
             )
         if adapter in {"command", "custom_cli"}:
             template = item.get("template", "").strip()

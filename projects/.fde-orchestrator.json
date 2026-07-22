@@ -1,0 +1,307 @@
+{
+  "version": 2,
+  "active_profile": "custom",
+  "active_prompt_pack": "aviation_investigation",
+  "tasks": {
+    "research": {
+      "provider": "codex",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "temperature": 0.25,
+      "timeout_seconds": 1200,
+      "retry_count": 1,
+      "fallback_provider": "anthropic_api",
+      "fallback_model": "claude-sonnet-5",
+      "enabled": true
+    },
+    "fact_verification": {
+      "provider": "codex",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "temperature": 0.1,
+      "timeout_seconds": 900,
+      "retry_count": 1,
+      "fallback_provider": "anthropic_api",
+      "fallback_model": "claude-sonnet-5",
+      "enabled": true
+    },
+    "structure": {
+      "provider": "codex",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "temperature": 0.55,
+      "timeout_seconds": 1200,
+      "retry_count": 1,
+      "fallback_provider": "codex",
+      "fallback_model": "gpt-5.6-sol",
+      "enabled": true
+    },
+    "script": {
+      "provider": "codex",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "temperature": 0.65,
+      "timeout_seconds": 1800,
+      "retry_count": 1,
+      "fallback_provider": "codex",
+      "fallback_model": "gpt-5.6-sol",
+      "enabled": true
+    },
+    "script_qa": {
+      "provider": "codex",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "temperature": 0.15,
+      "timeout_seconds": 900,
+      "retry_count": 1,
+      "fallback_provider": "anthropic_api",
+      "fallback_model": "claude-sonnet-5",
+      "enabled": true
+    },
+    "shot_planner": {
+      "provider": "claude_code",
+      "model": "claude-sonnet-5",
+      "reasoning_effort": "medium",
+      "temperature": 0.45,
+      "timeout_seconds": 1200,
+      "retry_count": 1,
+      "fallback_provider": "codex",
+      "fallback_model": "gpt-5.6-sol",
+      "enabled": true
+    },
+    "asset_optimizer": {
+      "provider": "codex",
+      "model": "gpt-5.6-terra",
+      "reasoning_effort": "medium",
+      "temperature": 0.15,
+      "timeout_seconds": 600,
+      "retry_count": 1,
+      "fallback_provider": "mock",
+      "fallback_model": "Deterministic Demo",
+      "enabled": true
+    },
+    "image_prompt_writer": {
+      "provider": "codex",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "medium",
+      "temperature": 0.55,
+      "timeout_seconds": 900,
+      "retry_count": 1,
+      "fallback_provider": "anthropic_api",
+      "fallback_model": "claude-sonnet-5",
+      "enabled": true
+    },
+    "image_generator": {
+      "provider": "grok_cli",
+      "model": "authenticated-default",
+      "reasoning_effort": "standard",
+      "temperature": 0.4,
+      "timeout_seconds": 3600,
+      "retry_count": 1,
+      "fallback_provider": "chatgpt_ui",
+      "fallback_model": "ChatGPT Images",
+      "enabled": true
+    },
+    "image_qc": {
+      "provider": "codex",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "medium",
+      "temperature": 0.1,
+      "timeout_seconds": 900,
+      "retry_count": 1,
+      "fallback_provider": "mock",
+      "fallback_model": "Deterministic Demo",
+      "enabled": true
+    },
+    "animation_prompt_writer": {
+      "provider": "codex",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "medium",
+      "temperature": 0.45,
+      "timeout_seconds": 900,
+      "retry_count": 1,
+      "fallback_provider": "anthropic_api",
+      "fallback_model": "claude-sonnet-5",
+      "enabled": true
+    },
+    "video_generator": {
+      "provider": "grok_cli",
+      "model": "authenticated-default",
+      "reasoning_effort": "standard",
+      "temperature": 0.4,
+      "timeout_seconds": 3600,
+      "retry_count": 1,
+      "fallback_provider": "grok_ui",
+      "fallback_model": "Grok Imagine",
+      "enabled": true
+    },
+    "video_qc": {
+      "provider": "codex",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "medium",
+      "temperature": 0.1,
+      "timeout_seconds": 900,
+      "retry_count": 1,
+      "fallback_provider": "mock",
+      "fallback_model": "Deterministic Demo",
+      "enabled": true
+    },
+    "voice_generator": {
+      "provider": "manual_upload",
+      "model": "External narration",
+      "reasoning_effort": "standard",
+      "temperature": 0,
+      "timeout_seconds": 0,
+      "retry_count": 0,
+      "fallback_provider": "manual_upload",
+      "fallback_model": "External narration",
+      "enabled": true
+    },
+    "timeline_builder": {
+      "provider": "codex",
+      "model": "gpt-5.6-terra",
+      "reasoning_effort": "low",
+      "temperature": 0.1,
+      "timeout_seconds": 600,
+      "retry_count": 1,
+      "fallback_provider": "mock",
+      "fallback_model": "Deterministic Demo",
+      "enabled": true
+    },
+    "composition_renderer": {
+      "provider": "hyperframes",
+      "model": "HyperFrames 0.7.62",
+      "reasoning_effort": "standard",
+      "temperature": 0,
+      "timeout_seconds": 14400,
+      "retry_count": 1,
+      "fallback_provider": "ffmpeg",
+      "fallback_model": "FFmpeg concat",
+      "enabled": true
+    },
+    "final_qc": {
+      "provider": "codex",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "temperature": 0.1,
+      "timeout_seconds": 900,
+      "retry_count": 1,
+      "fallback_provider": "anthropic_api",
+      "fallback_model": "claude-sonnet-5",
+      "enabled": true
+    }
+  },
+  "providers": {
+    "codex": {
+      "command_template": "/Users/ananthu/.vscode/extensions/openai.chatgpt-26.715.31925-darwin-arm64/bin/macos-aarch64/codex exec --skip-git-repo-check --model {model} --output-last-message {output} - < {prompt}",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "claude_code": {
+      "command_template": "claude --model {model} -p \"$(cat {prompt})\" > {output}",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "anthropic_api": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "gemini_cli": {
+      "command_template": "gemini -m {model} -p \"$(cat {prompt})\" > {output}",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "grok_cli": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "custom_cli": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "chatgpt_ui": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "grok_ui": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "manual_upload": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "hyperframes": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "ffmpeg": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "mock": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "future_api": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": false
+    }
+  },
+  "prompt_packs": {
+    "aviation_investigation": {
+      "id": "aviation_investigation",
+      "label": "Aviation Investigation",
+      "description": "Technically credible air-crash and disappearance investigations.",
+      "instructions": "Use restrained aviation-investigation language. Distinguish recorded evidence, official findings, expert inference and unresolved theory. Preserve aircraft, cockpit, geography and timeline continuity. Never sensationalize victims."
+    },
+    "engineering_failure": {
+      "id": "engineering_failure",
+      "label": "Engineering Failure",
+      "description": "Bridge, building, industrial and infrastructure failures.",
+      "instructions": "Explain the failure chain from load, material, process and organizational decisions. Prefer causal diagrams and evidence over spectacle. Separate initiating event from contributing conditions."
+    },
+    "cyber_incident": {
+      "id": "cyber_incident",
+      "label": "Cyber Incident",
+      "description": "Major breaches, outages and software-system failures.",
+      "instructions": "Make digital systems understandable without inventing interfaces. Separate confirmed indicators, attributed behavior and speculation. Avoid operational instructions that could enable abuse."
+    },
+    "space_mission": {
+      "id": "space_mission",
+      "label": "Space Mission Failure",
+      "description": "Launch, spacecraft and mission investigations.",
+      "instructions": "Maintain mission chronology, vehicle configuration and orbital realism. Explain engineering tradeoffs clearly and avoid fictional telemetry or unsupported causal certainty."
+    },
+    "general_documentary": {
+      "id": "general_documentary",
+      "label": "General Investigation",
+      "description": "Neutral default for any major failure or mystery.",
+      "instructions": "Build curiosity through evidence and unanswered questions, not exaggeration. Clearly label uncertainty and preserve human dignity throughout the story."
+    }
+  },
+  "rules": [
+    {
+      "id": "long_script_quality",
+      "label": "Long documentary script",
+      "enabled": true,
+      "task_id": "script",
+      "field": "duration_seconds",
+      "operator": ">",
+      "value": 600,
+      "provider": "claude_code",
+      "model": "claude-opus-4-8",
+      "reasoning_effort": "high"
+    }
+  ]
+}

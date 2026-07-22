@@ -105,6 +105,44 @@ def test_routed_structured_agent_can_fallback_across_adapters(tmp_path: Path, mo
     assert "Offline demonstration dossier" in result.summary
 
 
+def test_anthropic_api_adapter_uses_structured_output(monkeypatch):
+    import json
+
+    from fde.providers import anthropic_api
+
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return json.dumps({
+                "content": [{"type": "text", "text": '{"answer":"ok"}'}]
+            }).encode()
+
+    def fake_urlopen(request, timeout):
+        captured["headers"] = dict(request.header_items())
+        captured["payload"] = json.loads(request.data)
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(anthropic_api, "urlopen", fake_urlopen)
+    result = anthropic_api.run_structured(
+        prompt="Return JSON", schema={"type": "object"}, model="claude-sonnet-5",
+        timeout=30, temperature=0.1, reasoning_effort="high",
+    )
+
+    assert result == {"answer": "ok"}
+    assert captured["payload"]["output_config"]["format"]["type"] == "json_schema"
+    assert captured["payload"]["model"] == "claude-sonnet-5"
+    assert captured["timeout"] == 30
+
+
 def test_hyperframes_chunk_windows_align_to_timeline_entries():
     from fde.rendering.hyperframes import chunk_windows
     timeline = Timeline(

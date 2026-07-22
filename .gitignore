@@ -1,16 +1,69 @@
+# Python
 __pycache__/
 *.py[cod]
-.venv/
-dist/
-build/
+*.pyo
+*.pyd
 .pytest_cache/
+.mypy_cache/
 .ruff_cache/
-projects/*/08_generated_images/inbox/*
-projects/*/10_generated_videos/inbox/*
-projects/*/13_preview/*.mp4
-projects/*/14_final/*.mp4
+.tox/
+.nox/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+env/
+ENV/
+*.egg
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Project-generated artifacts
+# Individual project runs are local working data and are never tracked.
+projects/*/
+# Shared project-level configuration remains trackable.
+!projects/.fde-orchestrator.json
 !projects/.gitkeep
+
+# Media and temp files
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*.part
+
+# Editor / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Node
 node_modules/
-package-lock.json
-projects/*/13_preview/composition/
-projects/*/14_final/composition/
+.npm/
+
+# Local tool/runtime state
+.cache/
+.vercel/
+.turbo/

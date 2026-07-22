@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 
@@ -32,6 +33,8 @@ from .render import render
 from .review import approval_summary, review_asset
 from .timeline import build_timeline
 from .video_jobs import create_video_jobs
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
 
 app = typer.Typer(help="Failure Documentary Engine")
 console = Console()

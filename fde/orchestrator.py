@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "capabilities": ["structured"],
         "command_template": "codex exec --skip-git-repo-check --model {model} --output-last-message {output} - < {prompt}",
         "media_command_template": "",
-        "models": ["gpt-5.6", "gpt-5.6-mini", "gpt-5.5-codex"],
+        "models": ["gpt-5.6-sol", "gpt-5.6-terra"],
     },
     "claude_code": {
         "id": "claude_code",
@@ -30,6 +31,18 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "command_template": "claude --model {model} -p \"$(cat {prompt})\" > {output}",
         "media_command_template": "",
         "models": ["claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"],
+    },
+    "anthropic_api": {
+        "id": "anthropic_api",
+        "label": "Claude API",
+        "mode": "api",
+        "adapter": "anthropic_api",
+        "executable": None,
+        "description": "Anthropic API-backed structured reasoning using ANTHROPIC_API_KEY.",
+        "capabilities": ["structured"],
+        "command_template": "",
+        "media_command_template": "",
+        "models": ["claude-sonnet-5", "claude-opus-4-8", "claude-haiku-4-5"],
     },
     "gemini_cli": {
         "id": "gemini_cli",
@@ -191,23 +204,23 @@ def route(provider: str, model: str, reasoning: str, temperature: float, timeout
 
 
 DEFAULT_TASK_ROUTES: dict[str, dict[str, Any]] = {
-    "research": route("codex", "gpt-5.6", "high", 0.25, 1200, 1, "gemini_cli", "gemini-3.5-pro"),
-    "fact_verification": route("codex", "gpt-5.6", "high", 0.10, 900, 1, "gemini_cli", "gemini-3.5-pro"),
-    "structure": route("claude_code", "claude-opus-4-8", "high", 0.55, 1200, 1, "codex", "gpt-5.6"),
-    "script": route("claude_code", "claude-opus-4-8", "high", 0.65, 1800, 1, "codex", "gpt-5.6"),
-    "script_qa": route("codex", "gpt-5.6", "high", 0.15, 900, 1, "gemini_cli", "gemini-3.5-pro"),
-    "shot_planner": route("claude_code", "claude-sonnet-5", "medium", 0.45, 1200, 1, "codex", "gpt-5.6"),
-    "asset_optimizer": route("codex", "gpt-5.6-mini", "medium", 0.15, 600, 1, "mock", "Deterministic Demo"),
-    "image_prompt_writer": route("codex", "gpt-5.6", "medium", 0.55, 900, 1, "gemini_cli", "gemini-3.5-pro"),
+    "research": route("codex", "gpt-5.6-sol", "high", 0.25, 1200, 1, "anthropic_api", "claude-sonnet-5"),
+    "fact_verification": route("codex", "gpt-5.6-sol", "high", 0.10, 900, 1, "anthropic_api", "claude-sonnet-5"),
+    "structure": route("claude_code", "claude-opus-4-8", "high", 0.55, 1200, 1, "codex", "gpt-5.6-sol"),
+    "script": route("claude_code", "claude-opus-4-8", "high", 0.65, 1800, 1, "codex", "gpt-5.6-sol"),
+    "script_qa": route("codex", "gpt-5.6-sol", "high", 0.15, 900, 1, "anthropic_api", "claude-sonnet-5"),
+    "shot_planner": route("claude_code", "claude-sonnet-5", "medium", 0.45, 1200, 1, "codex", "gpt-5.6-sol"),
+    "asset_optimizer": route("codex", "gpt-5.6-terra", "medium", 0.15, 600, 1, "mock", "Deterministic Demo"),
+    "image_prompt_writer": route("codex", "gpt-5.6-sol", "medium", 0.55, 900, 1, "anthropic_api", "claude-sonnet-5"),
     "image_generator": route("grok_cli", "authenticated-default", "standard", 0.40, 3600, 1, "chatgpt_ui", "ChatGPT Images"),
-    "image_qc": route("codex", "gpt-5.6", "medium", 0.10, 900, 1, "mock", "Deterministic Demo"),
-    "animation_prompt_writer": route("codex", "gpt-5.6", "medium", 0.45, 900, 1, "gemini_cli", "gemini-3.5-pro"),
+    "image_qc": route("codex", "gpt-5.6-sol", "medium", 0.10, 900, 1, "mock", "Deterministic Demo"),
+    "animation_prompt_writer": route("codex", "gpt-5.6-sol", "medium", 0.45, 900, 1, "anthropic_api", "claude-sonnet-5"),
     "video_generator": route("grok_cli", "authenticated-default", "standard", 0.40, 3600, 1, "grok_ui", "Grok Imagine"),
-    "video_qc": route("codex", "gpt-5.6", "medium", 0.10, 900, 1, "mock", "Deterministic Demo"),
+    "video_qc": route("codex", "gpt-5.6-sol", "medium", 0.10, 900, 1, "mock", "Deterministic Demo"),
     "voice_generator": route("manual_upload", "External narration", "standard", 0, 0, 0, "manual_upload", "External narration"),
-    "timeline_builder": route("codex", "gpt-5.6-mini", "low", 0.10, 600, 1, "mock", "Deterministic Demo"),
+    "timeline_builder": route("codex", "gpt-5.6-terra", "low", 0.10, 600, 1, "mock", "Deterministic Demo"),
     "composition_renderer": route("hyperframes", "HyperFrames 0.7.62", "standard", 0, 14400, 1, "ffmpeg", "FFmpeg concat"),
-    "final_qc": route("codex", "gpt-5.6", "high", 0.10, 900, 1, "gemini_cli", "gemini-3.5-pro"),
+    "final_qc": route("codex", "gpt-5.6-sol", "high", 0.10, 900, 1, "anthropic_api", "claude-sonnet-5"),
 }
 
 
@@ -260,9 +273,9 @@ PROFILES: dict[str, dict[str, Any]] = {
         "id": "balanced", "label": "Balanced",
         "description": "One subscription-backed CLI path for text and Grok media with local deterministic assembly.",
         "routes": _profile_routes({
-            "structure": ("codex", "gpt-5.6", "high"), "script": ("codex", "gpt-5.6", "high"),
-            "shot_planner": ("codex", "gpt-5.6-mini", "medium"),
-            "image_prompt_writer": ("codex", "gpt-5.6-mini", "medium"),
+            "structure": ("codex", "gpt-5.6-sol", "high"), "script": ("codex", "gpt-5.6-sol", "high"),
+            "shot_planner": ("codex", "gpt-5.6-terra", "medium"),
+            "image_prompt_writer": ("codex", "gpt-5.6-terra", "medium"),
         }),
     },
     "grok_first": {
@@ -285,7 +298,7 @@ PROFILES: dict[str, dict[str, Any]] = {
         "id": "fast", "label": "Fast",
         "description": "Lower reasoning with Grok CLI media and FFmpeg rendering.",
         "routes": _profile_routes({
-            **{task["id"]: ("codex", "gpt-5.6-mini", "low") for task in TASK_DEFINITIONS if task["capability"] == "structured"},
+            **{task["id"]: ("codex", "gpt-5.6-terra", "low") for task in TASK_DEFINITIONS if task["capability"] == "structured"},
             "composition_renderer": ("ffmpeg", "FFmpeg concat", "standard"),
         }),
     },
@@ -366,6 +379,14 @@ def provider_health(provider_id: str, provider_overrides: dict[str, Any] | None 
         return {"provider_id": provider_id, "status": "ready", "healthy": True, "detail": "Manual handoff ready"}
     if provider["mode"] == "mock":
         return {"provider_id": provider_id, "status": "ready", "healthy": True, "detail": "Offline generator ready"}
+    if provider_id == "anthropic_api":
+        configured = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+        return {
+            "provider_id": provider_id,
+            "status": "ready" if configured else "unconfigured",
+            "healthy": configured,
+            "detail": "ANTHROPIC_API_KEY configured" if configured else "Set ANTHROPIC_API_KEY before starting Studio",
+        }
     if provider_id == "custom_cli":
         configured = bool((overrides.get("command_template") or "").strip() or (overrides.get("media_command_template") or "").strip())
         return {"provider_id": provider_id, "status": "ready" if configured else "unconfigured", "healthy": configured, "detail": "Custom command configured" if configured else "Add a structured or media command template"}
