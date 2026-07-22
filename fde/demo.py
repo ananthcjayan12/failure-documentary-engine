@@ -56,6 +56,16 @@ def create_demo(store: ProjectStore, project_id: str) -> Path:
     # Compatibility master-asset/contact-sheet outputs retained for existing tools.
     shot_plan = load_model(project_dir / "06_shots/shot_plan.json", ShotPlan)
     plan = generate_image_prompts(optimize_shots(shot_plan, brief.maximum_master_assets), shot_plan)
+    # The compact V1 mock narration may form one exact shot. Older demo/review tests
+    # intentionally compare invalidation across two assets, so retain a second harmless
+    # compatibility master without changing the V1 shot or media-job workflow.
+    if len(plan.assets) == 1:
+        duplicate = plan.assets[0].model_copy(deep=True)
+        duplicate.asset_id = "A02"
+        duplicate.title = f"{duplicate.title} — alternate"
+        duplicate.primary_use = "Compatibility alternate for local review and invalidation testing"
+        duplicate.secondary_uses = [*duplicate.secondary_uses, "offline demo comparison"]
+        plan.assets.append(duplicate)
     legacy_images = project_dir / "08_generated_images/approved"
     legacy_images.mkdir(parents=True, exist_ok=True)
     for index, asset in enumerate(plan.assets):
