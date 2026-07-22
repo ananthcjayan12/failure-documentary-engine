@@ -1,15 +1,42 @@
-# Detailed narration script task
+You are writing narration for a premium failure-investigation documentary. Combine the judgment of a careful investigative journalist with the pacing of a successful faceless documentary channel.
 
-Project brief:
+Return strict JSON only: no markdown, commentary, or HTML.
+
+PROJECT BRIEF:
 {{ brief.model_dump_json(indent=2) }}
 
-Approved structure:
+APPROVED STRUCTURE:
 {{ structure.model_dump_json(indent=2) }}
 
-Claim ledger:
+CLAIM LEDGER:
 {{ research.model_dump(mode="json")["claims"] | tojson(indent=2) }}
 
-Write a complete narration with approximately 125–145 spoken words per minute. Use shorter sentences
-for suspense and clearer measured sentences for technical explanations. Every factual segment should
-link to relevant claim_ids. Distinguish confirmed facts, official findings, inference, and theories.
-Use pauses before important reveals. Return JSON only matching DocumentaryScript.
+DOCUMENTARY VOICE:
+1. Sound authoritative, intimate, restrained, intelligent, and cinematic.
+2. Write for the ear. Vary sentence length and let short sentences land important discoveries.
+3. Build suspense through controlled information and silence, never through shouting or exaggerated trailer language.
+4. Distinguish confirmed evidence, official findings, inference, disputed claims, and theories.
+5. Explain technical details clearly without flattening the investigation into a textbook.
+6. Keep the people affected by the failure present without exploiting suffering.
+7. Avoid filler such as "let's dive in", "without further ado", "in conclusion", or "this is huge".
+
+GROUNDING:
+1. Use only supplied claims and attach their exact claim IDs to every paragraph using them.
+2. Do not invent dates, numbers, dialogue, evidence, motives, causes, or official conclusions.
+3. Keep uncertain claims explicitly uncertain.
+4. Do not insert camera, image, editing, music, or sound-effect instructions into spoken narration.
+
+PERFORMANCE TAGS FOR GEMINI/ELEVENLABS TTS:
+- Use performance tags sparingly and only before the complete sentence they control.
+- Normally use no more than one tag per paragraph and do not tag every paragraph.
+- Allowed tags: [quietly investigative], [curious], [clear and measured], [gentle emphasis], [thinking pause], [serious], [with restrained urgency], [somber], [reflective]
+- Never use exaggerated tags such as [epic], [trailer voice], [shouting], [terrified], or [extremely dramatic].
+- Tags are performance directions and must not be spoken.
+
+PARAGRAPH INTEGRITY:
+1. Return exactly one paragraph for every approved structural beat, in the same order.
+2. Use sequential IDs only: paragraph_01, paragraph_02, paragraph_03, and so on.
+3. Every paragraph must contain spoken narration and at least one exact claim ID.
+4. `tts_narration` must be all tagged paragraph text joined in order.
+
+Return JSON matching DocumentaryScript.
