@@ -1,0 +1,48 @@
+name: Apply FDE v0.6 implementation
+
+on:
+  push:
+    branches:
+      - feature/narration-live-jobs-sfx
+
+permissions:
+  contents: write
+
+jobs:
+  apply-source:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/narration-live-jobs-sfx
+          fetch-depth: 0
+
+      - name: Verify and extract implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '70f5a924d210a7328f2132058e44266273ddafe763aff5121759a8296e217ca7  .github/fde-bootstrap/fde-v06.tar.gz' | sha256sum --check --strict
+          tar -xzf .github/fde-bootstrap/fde-v06.tar.gz -C .
+
+      - name: Run validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+          python -m compileall -q fde
+          node --check fde/studio/static/app.js
+          PYTHONPATH=. pytest -q
+
+      - name: Publish extracted implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .github/fde-bootstrap
+          rm -f .github/workflows/apply-fde-v06.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: add narration-first production, live jobs, and sound design'
+          git push origin HEAD:feature/narration-live-jobs-sfx
