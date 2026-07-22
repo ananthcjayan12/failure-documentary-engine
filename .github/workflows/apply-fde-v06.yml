@@ -25,8 +25,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo '70f5a924d210a7328f2132058e44266273ddafe763aff5121759a8296e217ca7  .github/fde-bootstrap/fde-v06.tar.gz' | sha256sum --check --strict
-          tar -xzf .github/fde-bootstrap/fde-v06.tar.gz -C .
+          cat .github/fde-bootstrap/part-* > /tmp/fde-v06.b64
+          base64 --decode /tmp/fde-v06.b64 > /tmp/fde-v06.tar.gz
+          echo '70f5a924d210a7328f2132058e44266273ddafe763aff5121759a8296e217ca7  /tmp/fde-v06.tar.gz' | sha256sum --check --strict
+          tar -xzf /tmp/fde-v06.tar.gz -C .
 
       - name: Run validation
         shell: bash
