@@ -11,6 +11,7 @@ from typing import Any
 
 from ..io import read_json, write_json
 from ..orchestrator import resolve_task
+from .restart import RESTART_SPECS, restart_stage
 
 
 def utc_now() -> str:
@@ -20,46 +21,64 @@ def utc_now() -> str:
 ACTION_COMMANDS: dict[str, list[str]] = {
     "research": ["research", "{project}", "--agent", "{agent}"],
     "structure": ["structure", "{project}", "--agent", "{agent}"],
-    "script": ["script", "{project}", "--agent", "{agent}"],
-    "shots": ["shots", "{project}", "--agent", "{agent}"],
+    "narration": ["narration", "{project}", "--agent", "{agent}"],
+    "script": ["narration", "{project}", "--agent", "{agent}"],
     "consume_research": ["research", "{project}", "--agent", "manual", "--consume-response"],
     "consume_structure": ["structure", "{project}", "--agent", "manual", "--consume-response"],
-    "consume_script": ["script", "{project}", "--agent", "manual", "--consume-response"],
-    "consume_shots": ["shots", "{project}", "--agent", "manual", "--consume-response"],
-    "optimize_assets": ["optimize-assets", "{project}"],
-    "generate_image_prompts": ["generate-image-prompts", "{project}"],
-    "contact_sheet": ["contact-sheet", "{project}"],
-    "export_image_factory": ["export-image-factory", "{project}"],
-    "generate_images": ["generate-media", "{project}", "image"],
-    "import_images": ["import-images", "{project}"],
-    "validate_assets": ["validate-assets", "{project}"],
-    "video_jobs": ["video-jobs", "{project}"],
-    "generate_videos": ["generate-media", "{project}", "video"],
-    "import_videos": ["import-videos", "{project}"],
-    "validate_videos": ["validate-videos", "{project}"],
-    "create_variants": ["create-variants", "{project}"],
-    "build_timeline": ["build-timeline", "{project}"],
-    "render_preview": ["render-preview", "{project}"],
-    "render_final": ["render-final-base", "{project}"],
+    "consume_narration": ["narration", "{project}", "--agent", "manual", "--consume-response"],
+    "consume_script": ["narration", "{project}", "--agent", "manual", "--consume-response"],
+    "generate_voice": ["generate-voice", "{project}"],
+    "generate_timing": ["generate-timing", "{project}"],
+    # Preserve the orchestrator-selected visual-director agent.  Without this
+    # placeholder the Studio resolves Claude/Codex/etc., but the CLI receives
+    # no --agent argument and silently falls back to its deterministic default.
+    "shots": ["shots", "{project}", "--agent", "{agent}"],
+    "prepare_images": ["prepare-images", "{project}"],
+    "generate_images": ["generate-images", "{project}"],
+    "approve_images": ["approve-images", "{project}"],
+    "render_animatic": ["render-animatic", "{project}"],
+    "approve_animatic": ["approve-animatic", "{project}"],
+    "prepare_videos": ["prepare-videos", "{project}"],
+    "generate_videos": ["generate-videos", "{project}"],
+    "approve_videos": ["approve-videos", "{project}"],
+    "render_final_preview": ["render-final-preview", "{project}"],
 }
-
 
 ACTION_TASKS: dict[str, str] = {
     "research": "research",
     "structure": "structure",
-    "script": "script",
+    "narration": "narration_writer",
+    "script": "narration_writer",
+    "generate_voice": "voice_generator",
+    "generate_timing": "word_alignment",
     "shots": "shot_planner",
-    "optimize_assets": "asset_optimizer",
-    "generate_image_prompts": "image_prompt_writer",
-    "export_image_factory": "image_generator",
+    "prepare_images": "image_prompt_writer",
     "generate_images": "image_generator",
-    "video_jobs": "animation_prompt_writer",
+    "render_animatic": "animatic_renderer",
+    "prepare_videos": "video_prompt_writer",
     "generate_videos": "video_generator",
-    "create_variants": "timeline_builder",
-    "build_timeline": "timeline_builder",
-    "render_preview": "composition_renderer",
-    "render_final": "composition_renderer",
+    "render_final_preview": "final_renderer",
 }
+
+
+def _voice_provider(route: dict[str, Any] | None, config: dict[str, Any]) -> str:
+    if config.get("agent_mode") == "mock" or (route or {}).get("provider") == "mock":
+        return "mock"
+    provider = str((route or {}).get("provider") or "google_tts").lower()
+    if provider == "manual_upload":
+        return "manual"
+    if "eleven" in provider:
+        return "elevenlabs"
+    return "gemini"
+
+
+def _restart_request(action: str) -> tuple[str, bool] | None:
+    for prefix, run_again in (("restart_", False), ("rerun_", True)):
+        if action.startswith(prefix):
+            stage_id = action[len(prefix):]
+            if stage_id in RESTART_SPECS:
+                return stage_id, run_again
+    return None
 
 
 class JobManager:
@@ -80,27 +99,22 @@ class JobManager:
 
     def state(self, project_id: str) -> dict[str, Any]:
         path = self.state_path(project_id)
+        payload: dict[str, Any] = {}
         if path.exists():
             try:
                 payload = read_json(path)
             except Exception:
                 payload = {}
-        else:
-            payload = {}
         process = self._processes.get(project_id)
         if process and process.poll() is None:
             payload["status"] = "running"
             payload["pid"] = process.pid
         return {
-            "status": payload.get("status", "idle"),
-            "action": payload.get("action"),
-            "label": payload.get("label"),
-            "started_at": payload.get("started_at"),
-            "ended_at": payload.get("ended_at"),
-            "return_code": payload.get("return_code"),
-            "error": payload.get("error"),
-            "pid": payload.get("pid"),
-            "routing": payload.get("routing"),
+            "status": payload.get("status", "idle"), "action": payload.get("action"),
+            "label": payload.get("label"), "started_at": payload.get("started_at"),
+            "ended_at": payload.get("ended_at"), "return_code": payload.get("return_code"),
+            "error": payload.get("error"), "pid": payload.get("pid"), "routing": payload.get("routing"),
+            "restart": payload.get("restart"),
         }
 
     def log_tail(self, project_id: str, lines: int = 160) -> str:
@@ -111,12 +125,29 @@ class JobManager:
         return "\n".join(data[-max(1, min(lines, 1000)):])
 
     def start(self, project_id: str, action: str, *, agent: str | None = None) -> dict[str, Any]:
-        if action not in ACTION_COMMANDS:
+        restart_request = _restart_request(action)
+        if not restart_request and action not in ACTION_COMMANDS:
             raise ValueError(f"Unknown action: {action}")
         with self._lock:
             running = self._processes.get(project_id)
             if running and running.poll() is None:
                 raise RuntimeError("A job is already running for this project")
+            restart_report = None
+            if restart_request:
+                if self.store is None:
+                    raise RuntimeError("Stage restart requires a project store")
+                stage_id, run_again = restart_request
+                restart_report = restart_stage(self.store, project_id, stage_id)
+                if not run_again:
+                    state = {
+                        "status": "completed", "action": action,
+                        "label": f"Restart {stage_id.replace('_', ' ').title()}",
+                        "started_at": utc_now(), "ended_at": utc_now(), "return_code": 0,
+                        "error": None, "pid": None, "routing": None, "restart": restart_report,
+                    }
+                    write_json(self.state_path(project_id), state)
+                    return state
+                action = restart_report["run_action"]
             config = self.config_getter()
             task_id = ACTION_TASKS.get(action)
             route = None
@@ -125,11 +156,7 @@ class JobManager:
                 if self.store is not None:
                     try:
                         brief = self.store.brief(project_id)
-                        context = {
-                            "duration_seconds": brief.target_duration_seconds,
-                            "topic": brief.topic,
-                            "title": brief.title,
-                        }
+                        context = {"duration_seconds": brief.target_duration_seconds, "topic": brief.topic, "title": brief.title}
                     except Exception:
                         context = {}
                 route = resolve_task(self.orchestrator_getter(), task_id, context)
@@ -142,13 +169,21 @@ class JobManager:
             elif config.get("agent_mode") == "mock" and accepts_agent:
                 selected_agent = "mock"
             elif route and accepts_agent:
-                selected_agent = "manual" if route.get("provider_mode") == "manual" else "mock" if route.get("provider_mode") == "mock" else "routed"
+                mode = route.get("provider_mode")
+                selected_agent = "manual" if mode == "manual" else "mock" if mode == "mock" else "routed"
             else:
                 selected_agent = config.get("agent_mode", "manual")
-            command_parts = [
-                part.format(project=project_id, agent=selected_agent)
-                for part in command_template
-            ]
+            command_parts = [part.format(project=project_id, agent=selected_agent) for part in command_template]
+            if action == "generate_voice":
+                voice_provider = _voice_provider(route, config)
+                if voice_provider == "manual":
+                    raise RuntimeError("Manual Upload is selected for voice. Upload a WAV in the Voice stage instead of running generation.")
+                command_parts.extend(["--provider", voice_provider])
+                if route:
+                    if route.get("model"):
+                        command_parts.extend(["--model", str(route["model"])])
+                    if route.get("voice"):
+                        command_parts.extend(["--voice", str(route["voice"])])
             command = [sys.executable, "-m", "fde", *command_parts, "--workspace", str(self.workspace)]
             env = os.environ.copy()
             if route:
@@ -169,61 +204,46 @@ class JobManager:
                 env["FDE_MEDIA_PROVIDER"] = str(route.get("provider", ""))
                 env["FDE_MEDIA_MODEL"] = str(route.get("model", ""))
                 env["FDE_MEDIA_TIMEOUT"] = str(route.get("timeout_seconds", 3600))
-                env["FDE_MEDIA_RETRIES"] = str(route.get("retry_count", 0))
                 env["FDE_MEDIA_COMMAND"] = str(route.get("media_command_template", ""))
-                env["FDE_MEDIA_FALLBACK_PROVIDER"] = str(route.get("fallback_provider", ""))
-                env["FDE_MEDIA_FALLBACK_MODEL"] = str(route.get("fallback_model", ""))
-                env["FDE_MEDIA_FALLBACK_COMMAND"] = str(route.get("fallback_media_command_template", ""))
-                env["FDE_RENDER_PROVIDER"] = str(route.get("provider", ""))
-                env["FDE_RENDER_FALLBACK_PROVIDER"] = str(route.get("fallback_provider", ""))
+                env["FDE_MEDIA_QUALITY"] = str(route.get("quality", ""))
+                env["FDE_MEDIA_RESOLUTION"] = str(route.get("resolution", ""))
+                env["FDE_MEDIA_ASPECT_RATIO"] = str(route.get("aspect_ratio", "16:9"))
+                env["FDE_MEDIA_DURATION"] = str(route.get("duration_seconds", 0) or "")
+                env["FDE_VOICE_MODEL"] = str(route.get("model", ""))
+                env["FDE_VOICE_NAME"] = str(route.get("voice", ""))
+                if task_id == "word_alignment":
+                    env["FDE_WHISPER_MODEL"] = str(route.get("model", "base.en"))
             elif config.get("command_template"):
                 env["FDE_LLM_COMMAND"] = str(config["command_template"])
             log_path = self.log_path(project_id)
             log_path.parent.mkdir(parents=True, exist_ok=True)
             log_handle = log_path.open("a", encoding="utf-8")
-            log_handle.write(f"\n[{utc_now()}] START {action}\n")
-            log_handle.write("$ " + " ".join(command) + "\n\n")
+            if restart_report:
+                log_handle.write(f"\n[{utc_now()}] RESTART {restart_report['stage_id']} archived to {restart_report['history_path']}\n")
+            log_handle.write(f"\n[{utc_now()}] START {action}\n$ {' '.join(command)}\n\n")
             log_handle.flush()
             process = subprocess.Popen(
-                command,
-                cwd=Path(__file__).resolve().parents[2],
-                stdout=log_handle,
-                stderr=subprocess.STDOUT,
-                text=True,
-                env=env,
-                start_new_session=True,
+                command, cwd=Path(__file__).resolve().parents[2], stdout=log_handle,
+                stderr=subprocess.STDOUT, text=True, env=env, start_new_session=True,
             )
             self._processes[project_id] = process
             state = {
-                "status": "running",
-                "action": action,
-                "label": action.replace("_", " ").title(),
-                "started_at": utc_now(),
-                "ended_at": None,
-                "return_code": None,
-                "error": None,
-                "pid": process.pid,
+                "status": "running", "action": action, "label": action.replace("_", " ").title(),
+                "started_at": utc_now(), "ended_at": None, "return_code": None, "error": None,
+                "pid": process.pid, "restart": restart_report,
                 "routing": ({
-                    "task_id": task_id,
-                    "provider": route.get("provider"),
-                    "provider_label": route.get("provider_label"),
-                    "model": route.get("model"),
-                    "reasoning_effort": route.get("reasoning_effort"),
-                    "fallback_provider": route.get("fallback_provider"),
-                    "fallback_model": route.get("fallback_model"),
-                    "prompt_pack": route.get("prompt_pack_label"),
-                    "capability": route.get("capability"),
-                    "adapter": route.get("provider_adapter"),
+                    "task_id": task_id, "provider": route.get("provider"),
+                    "provider_label": route.get("provider_label"), "model": route.get("model"),
+                    "reasoning_effort": route.get("reasoning_effort"), "quality": route.get("quality"),
+                    "resolution": route.get("resolution"), "aspect_ratio": route.get("aspect_ratio"),
+                    "duration_seconds": route.get("duration_seconds"), "voice": route.get("voice"),
+                    "fallback_provider": route.get("fallback_provider"), "fallback_model": route.get("fallback_model"),
+                    "capability": route.get("capability"), "adapter": route.get("provider_adapter"),
                     "matched_rule": route.get("matched_rule"),
                 } if route else None),
             }
             write_json(self.state_path(project_id), state)
-            thread = threading.Thread(
-                target=self._wait_for_job,
-                args=(project_id, process, log_handle, state),
-                daemon=True,
-            )
-            thread.start()
+            threading.Thread(target=self._wait_for_job, args=(project_id, process, log_handle, state), daemon=True).start()
             return state
 
     def stop(self, project_id: str) -> dict[str, Any]:
@@ -248,9 +268,7 @@ class JobManager:
         log_handle.close()
         status = "completed" if return_code == 0 else "waiting" if return_code == 2 else "failed"
         state.update({
-            "status": status,
-            "ended_at": utc_now(),
-            "return_code": return_code,
+            "status": status, "ended_at": utc_now(), "return_code": return_code,
             "error": None if return_code in {0, 2} else f"Command exited with status {return_code}",
         })
         write_json(self.state_path(project_id), state)

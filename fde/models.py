@@ -16,16 +16,34 @@ class ProjectState(str, Enum):
     RESEARCH_READY = "RESEARCH_READY"
     STRUCTURE_REVIEW = "STRUCTURE_REVIEW"
     STRUCTURE_APPROVED = "STRUCTURE_APPROVED"
+
+    NARRATION_REVIEW = "NARRATION_REVIEW"
+    NARRATION_APPROVED = "NARRATION_APPROVED"
+    VOICE_GENERATING = "VOICE_GENERATING"
+    VOICE_REVIEW = "VOICE_REVIEW"
+    VOICE_APPROVED = "VOICE_APPROVED"
+    SHOTS_GENERATING = "SHOTS_GENERATING"
+    SHOTS_REVIEW = "SHOTS_REVIEW"
+    SHOTS_APPROVED = "SHOTS_APPROVED"
+    IMAGES_GENERATING = "IMAGES_GENERATING"
+    IMAGES_REVIEW = "IMAGES_REVIEW"
+    IMAGES_APPROVED = "IMAGES_APPROVED"
+    ANIMATIC_READY = "ANIMATIC_READY"
+    ANIMATIC_APPROVED = "ANIMATIC_APPROVED"
+    VIDEOS_GENERATING = "VIDEOS_GENERATING"
+    VIDEOS_REVIEW = "VIDEOS_REVIEW"
+    VIDEOS_APPROVED = "VIDEOS_APPROVED"
+    FINAL_PREVIEW_READY = "FINAL_PREVIEW_READY"
+
+    # Backwards-compatible states retained for existing projects and commands.
     SCRIPT_REVIEW = "SCRIPT_REVIEW"
     SCRIPT_APPROVED = "SCRIPT_APPROVED"
     SHOT_PLAN_READY = "SHOT_PLAN_READY"
     ASSET_PLAN_READY = "ASSET_PLAN_READY"
     IMAGE_GENERATION = "IMAGE_GENERATION"
     IMAGE_REVIEW = "IMAGE_REVIEW"
-    IMAGES_APPROVED = "IMAGES_APPROVED"
     VIDEO_GENERATION = "VIDEO_GENERATION"
     VIDEO_REVIEW = "VIDEO_REVIEW"
-    VIDEOS_APPROVED = "VIDEOS_APPROVED"
     NARRATION_READY = "NARRATION_READY"
     PREVIEW_REVIEW = "PREVIEW_REVIEW"
     PICTURE_LOCKED = "PICTURE_LOCKED"
@@ -119,8 +137,8 @@ class NarrationSegment(BaseModel):
     narration_id: str
     chapter_id: str
     text: str
-    estimated_start: float
-    estimated_duration: float = Field(gt=0)
+    estimated_start: float = 0
+    estimated_duration: float = Field(default=1, gt=0)
     mood: str = "investigative"
     intensity: float = Field(default=0.5, ge=0, le=1)
     claim_ids: list[str] = Field(default_factory=list)
@@ -131,19 +149,38 @@ class DocumentaryScript(BaseModel):
     project_id: str
     title: str
     segments: list[NarrationSegment]
-    estimated_total_seconds: float
-    estimated_word_count: int
+    estimated_total_seconds: float = 0
+    estimated_word_count: int = 0
+    tts_narration: str = ""
+
+    @model_validator(mode="after")
+    def fill_summary_fields(self) -> "DocumentaryScript":
+        if not self.tts_narration:
+            self.tts_narration = "\n\n".join(item.text.strip() for item in self.segments)
+        if not self.estimated_word_count:
+            import re
+            clean = re.sub(r"\[[^\[\]]+\]\s*", "", self.tts_narration)
+            self.estimated_word_count = len(clean.split())
+        if not self.estimated_total_seconds:
+            self.estimated_total_seconds = sum(item.estimated_duration for item in self.segments)
+        return self
 
 
 class Shot(BaseModel):
     shot_id: str
-    chapter_id: str
-    narration_ids: list[str]
+    chapter_id: str = ""
+    narration_ids: list[str] = Field(default_factory=list)
     start: float
-    duration: float = Field(gt=0)
-    visual_purpose: str
-    visual_type: str
-    suggested_visual: str
+    duration: float = Field(default=1, gt=0)
+    end: float | None = None
+    narration_text: str = ""
+    visual_purpose: str = ""
+    visual_type: str = "generated_image"
+    suggested_visual: str = ""
+    image_prompt: str = ""
+    video_prompt: str = ""
+    sound_hint: str = ""
+    transition: str = "hard_cut"
     camera: str = ""
     motion: str = ""
     overlay_requirements: list[str] = Field(default_factory=list)
@@ -151,11 +188,110 @@ class Shot(BaseModel):
     requires_new_master_asset: bool = True
     candidate_master_asset: str | None = None
 
+    @model_validator(mode="after")
+    def normalize_end(self) -> "Shot":
+        if self.end is None:
+            self.end = self.start + self.duration
+        elif self.end <= self.start:
+            raise ValueError("shot end must be after start")
+        else:
+            self.duration = self.end - self.start
+        return self
+
 
 class ShotPlan(BaseModel):
     project_id: str
     shots: list[Shot]
     total_seconds: float
+    voiceover_sha256: str = ""
+
+
+class AudioChapterRecord(BaseModel):
+    paragraph_id: str
+    tagged_text: str
+    clean_text: str
+    path: str
+    cache_key: str
+    cache_reused: bool = False
+    absolute_start: float
+    speech_duration: float
+    trailing_pause: float
+    absolute_end: float
+    quality: dict[str, float | str] = Field(default_factory=dict)
+    alignment_path: str | None = None
+
+
+class AudioManifest(BaseModel):
+    project_id: str
+    provider: str
+    model_id: str
+    voice_id: str
+    sample_rate: int = 24000
+    chapter_gap_seconds: float = 0.3
+    duration_seconds: float
+    voiceover_wav: str
+    voiceover_mp3: str | None = None
+    voiceover_sha256: str
+    chapters: list[AudioChapterRecord]
+    created_at: str = Field(default_factory=utc_now)
+
+
+class WordTiming(BaseModel):
+    index: int
+    paragraph_id: str
+    word: str
+    start: float
+    end: float
+    confidence: float | None = None
+
+
+class ParagraphTiming(BaseModel):
+    paragraph_id: str
+    start: float
+    end: float
+    duration: float
+
+
+class AudioTiming(BaseModel):
+    project_id: str
+    source: str
+    exact: bool
+    voiceover_sha256: str
+    audio_duration_seconds: float
+    paragraphs: list[ParagraphTiming]
+    words: list[WordTiming]
+
+
+class V1MediaJob(BaseModel):
+    job_id: str
+    shot_id: str
+    media_type: Literal["image", "video"]
+    status: Literal["pending", "generating", "review", "approved", "rejected", "failed", "manual_required"] = "pending"
+    prompt: str
+    output: str | None = None
+    reference: str | None = None
+    duration_seconds: float = 0
+    resolution: str = "720p"
+    aspect_ratio: str = "16:9"
+    error: str | None = None
+    updated_at: str = Field(default_factory=utc_now)
+
+
+class V1MediaManifest(BaseModel):
+    project_id: str
+    media_type: Literal["image", "video"]
+    jobs: list[V1MediaJob]
+    updated_at: str = Field(default_factory=utc_now)
+
+
+class AnimaticManifest(BaseModel):
+    project_id: str
+    output: str
+    duration_seconds: float
+    voiceover_sha256: str
+    sound_plan: str
+    shots: list[str]
+    created_at: str = Field(default_factory=utc_now)
 
 
 class AssetReview(BaseModel):

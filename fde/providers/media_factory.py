@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import shlex
 import shutil
@@ -15,7 +14,10 @@ from ..assets import import_images
 from ..io import load_model, read_json, write_json
 from ..media import has_command, import_videos
 from ..models import MasterAssetPlan, ReviewStatus
+from .gemini_api import generate_image as generate_gemini_image
+from .gemini_api import generate_video as generate_gemini_video
 from .grok_cli import generate_media as generate_grok_media
+from .openai_image_api import generate_image as generate_openai_image
 
 
 def utc_now() -> str:
@@ -58,19 +60,19 @@ def _mock_video(destination: Path, reference: Path | None, duration: float) -> N
 
 def _custom_media_command(
     *, template: str, prompt: str, destination: Path, reference: Path | None,
-    model: str, duration: float, aspect_ratio: str, cwd: Path, timeout: int,
+    model: str, duration: float, aspect_ratio: str, quality: str, resolution: str,
+    cwd: Path, timeout: int,
 ) -> dict[str, Any]:
     if not template.strip():
         raise RuntimeError("Custom CLI media command is not configured")
     prompt_path = destination.parent / "prompt.txt"
     prompt_path.write_text(prompt + "\n", encoding="utf-8")
     command = template.format(
-        prompt=shlex.quote(str(prompt_path)),
-        output=shlex.quote(str(destination)),
-        reference=shlex.quote(str(reference or "")),
-        model=shlex.quote(model),
-        duration=shlex.quote(str(duration)),
-        aspect_ratio=shlex.quote(aspect_ratio),
+        prompt=shlex.quote(str(prompt_path)), output=shlex.quote(str(destination)),
+        reference=shlex.quote(str(reference or "")), model=shlex.quote(model),
+        duration=shlex.quote(str(duration)), aspect_ratio=shlex.quote(aspect_ratio),
+        quality=shlex.quote(quality), resolution=shlex.quote(resolution),
+        media_type=shlex.quote("video" if destination.suffix.lower() in {".mp4", ".mov", ".webm"} else "image"),
         cwd=shlex.quote(str(cwd)),
     )
     result = subprocess.run(command, shell=True, cwd=cwd, capture_output=True, text=True, timeout=max(1, timeout))
@@ -81,33 +83,60 @@ def _custom_media_command(
         raise RuntimeError(f"Custom media command failed ({result.returncode}): {(result.stderr or result.stdout)[-3000:]}")
     if not destination.exists():
         raise RuntimeError("Custom media command completed without creating the configured output path")
-    return {"provider": "custom_cli", "model": model, "path": str(destination)}
+    return {
+        "provider": "custom_cli", "model": model, "quality": quality,
+        "resolution": resolution, "aspect_ratio": aspect_ratio, "path": str(destination),
+    }
 
 
 def generate_one(
     *, provider: str, model: str, prompt: str, destination: Path, media_type: str,
     cwd: Path, reference: Path | None, duration: float, timeout: int,
-    media_command_template: str = "",
+    media_command_template: str = "", quality: str = "", resolution: str = "",
+    aspect_ratio: str = "16:9",
 ) -> dict[str, Any]:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if provider == "grok_cli":
         return generate_grok_media(
             prompt=prompt, destination=destination, media_type=media_type, cwd=cwd,
-            reference=reference, model=model, timeout=timeout, duration=duration, aspect_ratio="16:9",
+            reference=reference, model=model, timeout=timeout, duration=duration,
+            aspect_ratio=aspect_ratio, resolution=resolution, quality=quality,
+        )
+    if provider == "gemini_api":
+        if media_type == "image":
+            return generate_gemini_image(
+                prompt=prompt, destination=destination, model=model,
+                resolution=resolution or "2K", aspect_ratio=aspect_ratio, quality=quality or "standard",
+                timeout=timeout,
+            )
+        return generate_gemini_video(
+            prompt=prompt, destination=destination, model=model, reference=reference,
+            resolution=resolution or "720p", aspect_ratio=aspect_ratio,
+            duration=duration, timeout=timeout,
+        )
+    if provider == "openai_image_api":
+        if media_type != "image":
+            raise RuntimeError("OpenAI GPT Image provider supports image generation only")
+        return generate_openai_image(
+            prompt=prompt, destination=destination, model=model,
+            resolution=resolution or "1536x1024", quality=quality or "high", timeout=timeout,
         )
     if provider == "custom_cli":
         return _custom_media_command(
             template=media_command_template, prompt=prompt, destination=destination,
-            reference=reference, model=model, duration=duration, aspect_ratio="16:9",
-            cwd=cwd, timeout=timeout,
+            reference=reference, model=model, duration=duration, aspect_ratio=aspect_ratio,
+            quality=quality, resolution=resolution, cwd=cwd, timeout=timeout,
         )
     if provider == "mock":
         if media_type == "image":
             _mock_image(destination, destination.parent.parent.name, prompt.splitlines()[0][:70])
         else:
             _mock_video(destination, reference, duration)
-        return {"provider": "mock", "model": model, "path": str(destination)}
-    if provider in {"chatgpt_ui", "grok_ui", "manual_upload"}:
+        return {
+            "provider": "mock", "model": model, "quality": quality,
+            "resolution": resolution, "aspect_ratio": aspect_ratio, "path": str(destination),
+        }
+    if provider in {"manual_upload"}:
         raise RuntimeError(f"{provider} is a manual handoff provider")
     raise RuntimeError(f"Provider {provider} has no native {media_type} adapter")
 
@@ -133,10 +162,16 @@ def generate_project_media(
         "media_type": media_type,
         "provider": route.get("provider"),
         "model": route.get("model"),
+        "quality": route.get("quality", ""),
+        "resolution": route.get("resolution", ""),
+        "aspect_ratio": route.get("aspect_ratio", "16:9"),
         "generated": [], "skipped": [], "failed": [], "manual_required": [],
     }
     retries = max(0, int(route.get("retry_count", 0)))
     timeout = max(1, int(route.get("timeout_seconds") or 3600))
+    quality = str(route.get("quality") or "")
+    resolution = str(route.get("resolution") or "")
+    aspect_ratio = str(route.get("aspect_ratio") or "16:9")
     for asset in plan.assets:
         if wanted and asset.asset_id not in wanted:
             continue
@@ -154,14 +189,12 @@ def generate_project_media(
         generated_path = version_dir / f"{asset.asset_id}_generated{extension}"
         reference = project_dir / asset.approved_image if media_type == "video" and asset.approved_image else None
         prompt = asset.image_prompt if media_type == "image" else asset.video_prompt
-        duration = 0 if media_type == "image" else float(os.getenv("FDE_MEDIA_DURATION", "5"))
+        duration = 0 if media_type == "image" else float(route.get("duration_seconds") or os.getenv("FDE_MEDIA_DURATION", "5"))
         attempts: list[dict[str, Any]] = []
-        candidates = [
-            (
-                str(route.get("provider")), str(route.get("model", "")),
-                str(route.get("media_command_template", "")), retries + 1,
-            )
-        ]
+        candidates = [(
+            str(route.get("provider")), str(route.get("model", "")),
+            str(route.get("media_command_template", "")), retries + 1,
+        )]
         fallback = str(route.get("fallback_provider") or "")
         if fallback and fallback != route.get("provider"):
             candidates.append((
@@ -178,13 +211,15 @@ def generate_project_media(
                         provider=provider_id, model=selected_model, prompt=prompt,
                         destination=generated_path, media_type=media_type, cwd=project_dir,
                         reference=reference, duration=duration, timeout=timeout,
-                        media_command_template=media_template,
+                        media_command_template=media_template, quality=quality,
+                        resolution=resolution, aspect_ratio=aspect_ratio,
                     )
                     attempts.append({"provider": provider_id, "model": selected_model, "attempt": attempt, "status": "complete"})
                     write_json(version_dir / "generation.json", {
                         **record, "asset_id": asset.asset_id, "media_type": media_type,
                         "prompt": prompt, "reference": str(reference) if reference else None,
-                        "created_at": utc_now(), "attempts": attempts,
+                        "quality": quality, "resolution": resolution, "aspect_ratio": aspect_ratio,
+                        "duration_seconds": duration, "created_at": utc_now(), "attempts": attempts,
                     })
                     inbox = root / "inbox"
                     inbox.mkdir(parents=True, exist_ok=True)
@@ -194,14 +229,13 @@ def generate_project_media(
                 except Exception as exc:
                     last_error = str(exc)
                     attempts.append({"provider": provider_id, "model": selected_model, "attempt": attempt, "status": "failed", "error": last_error})
-                    if provider_id in {"chatgpt_ui", "grok_ui", "manual_upload"}:
+                    if provider_id == "manual_upload":
                         manual = True
                         break
             if success or manual:
                 break
         item_state = {
-            "asset_id": asset.asset_id,
-            "version": version,
+            "asset_id": asset.asset_id, "version": version,
             "status": "generated" if success else "manual_required" if manual else "failed",
             "updated_at": utc_now(), "attempts": attempts,
             "output": str(generated_path.relative_to(project_dir)) if success else None,
@@ -216,7 +250,7 @@ def generate_project_media(
         else:
             report["failed"].append(item_state)
     if report["generated"]:
-        imported = import_images(project_dir) if media_type == "image" else import_videos(project_dir, float(os.getenv("FDE_MEDIA_DURATION", "5")))
+        imported = import_images(project_dir) if media_type == "image" else import_videos(project_dir, float(route.get("duration_seconds") or os.getenv("FDE_MEDIA_DURATION", "5")))
         report["import"] = imported
     write_json(root / "generation_report.json", report)
     return report

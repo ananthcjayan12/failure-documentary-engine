@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import os
-import shutil
 from pathlib import Path
 from typing import Annotated
 
@@ -12,31 +10,31 @@ from rich.console import Console
 from rich.table import Table
 
 from .agents import AgentPending
-from .assets import generate_image_prompts, import_images
-from .contact_sheet import generate_contact_sheet
 from .demo import create_demo
 from .io import load_model, read_json, safe_copy, write_json
-from .image_factory import export_image_factory_packet, import_image_factory_batch
-from .media import create_variants, has_command, import_videos
-from .providers.media_factory import generate_project_media
-from .models import (
-    MasterAssetPlan,
-    ProjectBrief,
-    ProjectState,
-    ReviewStatus,
-    ShotPlan,
+from .media import has_command
+from .models import ProjectBrief, ProjectState, V1MediaManifest
+from .pipeline import (
+    generate_research,
+    generate_script,
+    generate_shots,
+    generate_structure,
+    generate_timing_stage,
+    generate_voice_stage,
+    generate_master_assets,
 )
-from .optimizer import optimize_shots
-from .pipeline import generate_research, generate_script, generate_shots, generate_structure
 from .project import ProjectStore
-from .render import render
-from .review import approval_summary, review_asset
-from .timeline import build_timeline
-from .video_jobs import create_video_jobs
+from .v1_media import (
+    approve_media,
+    generate_media_jobs,
+    prepare_media_jobs,
+    render_animatic,
+    render_final_preview,
+    transition_after_media,
+)
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
-
-app = typer.Typer(help="Failure Documentary Engine")
+app = typer.Typer(help="Failure Documentary Engine — V1 audio-first production")
 console = Console()
 
 
@@ -48,17 +46,32 @@ def _run_agent(callable_):
     try:
         result = callable_()
         console.print(f"[green]Created {type(result).__name__}[/green]")
+        return result
     except AgentPending as exc:
         console.print(f"[yellow]{exc}[/yellow]")
         raise typer.Exit(code=2)
 
 
+def _csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 @app.command()
 def doctor() -> None:
-    """Check local dependencies."""
     table = Table("Tool", "Available", "Purpose")
-    for name, purpose in [("ffmpeg", "rendering and variants"), ("ffprobe", "video validation"), ("codex", "optional command agent"), ("grok", "Grok reasoning and Imagine media"), ("npx", "local HyperFrames runtime")]:
+    for name, purpose in [
+        ("ffmpeg", "voice assembly, animatic and final preview"),
+        ("ffprobe", "final stream validation"),
+        ("codex", "optional structured narration/research agent"),
+        ("grok", "optional image and video generation"),
+    ]:
         table.add_row(name, "yes" if has_command(name) else "no", purpose)
+    try:
+        import google.genai  # noqa: F401
+        gemini = "yes"
+    except Exception:
+        gemini = "no"
+    table.add_row("google-genai", gemini, "Gemini TTS")
     console.print(table)
 
 
@@ -72,8 +85,11 @@ def init(
     workspace: Annotated[Path, typer.Option()] = Path("projects"),
 ) -> None:
     brief = ProjectBrief(
-        project_id=project_id, title=title, topic=topic or title,
-        target_duration_seconds=duration, maximum_master_assets=max_assets,
+        project_id=project_id,
+        title=title,
+        topic=topic or title,
+        target_duration_seconds=duration,
+        maximum_master_assets=max_assets,
     )
     path = store(workspace).create(brief)
     console.print(f"[green]Created project[/green] {path}")
@@ -95,263 +111,229 @@ def structure(project_id: str, agent: str = "manual", consume_response: bool = F
     _run_agent(lambda: generate_structure(store(workspace), project_id, agent, consume_response))
 
 
-@app.command()
-def script(project_id: str, agent: str = "manual", consume_response: bool = False, workspace: Path = Path("projects")) -> None:
+@app.command("narration")
+def narration_cmd(project_id: str, agent: str = "manual", consume_response: bool = False, workspace: Path = Path("projects")) -> None:
     _run_agent(lambda: generate_script(store(workspace), project_id, agent, consume_response))
 
 
 @app.command()
-def shots(project_id: str, agent: str = "manual", consume_response: bool = False, workspace: Path = Path("projects")) -> None:
-    _run_agent(lambda: generate_shots(store(workspace), project_id, agent, consume_response))
+def script(project_id: str, agent: str = "manual", consume_response: bool = False, workspace: Path = Path("projects")) -> None:
+    """Compatibility alias for `narration`."""
+    narration_cmd(project_id, agent, consume_response, workspace)
 
 
 @app.command("approve-stage")
 def approve_stage(project_id: str, stage: str, workspace: Path = Path("projects")) -> None:
+    s = store(workspace)
     mapping = {
-        "structure": ProjectState.STRUCTURE_APPROVED,
-        "script": ProjectState.SCRIPT_APPROVED,
+        "structure": ("structure", ProjectState.STRUCTURE_APPROVED),
+        "narration": ("narration", ProjectState.NARRATION_APPROVED),
+        "script": ("narration", ProjectState.NARRATION_APPROVED),
+        "voice": ("voice", ProjectState.VOICE_APPROVED),
+        "shots": ("shots", ProjectState.SHOTS_APPROVED),
+        "images": ("images", ProjectState.IMAGES_APPROVED),
+        "animatic": ("animatic", ProjectState.ANIMATIC_APPROVED),
+        "videos": ("videos", ProjectState.VIDEOS_APPROVED),
     }
     if stage not in mapping:
-        raise typer.BadParameter("stage must be structure or script")
-    s = store(workspace)
-    s.approve_version(project_id, stage)
-    s.transition(project_id, mapping[stage])
+        raise typer.BadParameter("stage must be structure, narration, voice, shots, images, animatic, or videos")
+    artifact, state = mapping[stage]
+    if stage in {"structure", "narration", "script", "shots"}:
+        s.approve_version(project_id, artifact)
+    if stage == "shots":
+        generate_master_assets(s, project_id)
+    s.transition(project_id, state)
     console.print(f"[green]Approved {stage}[/green]")
 
 
-@app.command("optimize-assets")
-def optimize_assets(project_id: str, max_assets: int | None = None, workspace: Path = Path("projects")) -> None:
-    s = store(workspace)
-    brief = s.brief(project_id)
-    shot_plan = load_model(s.project_dir(project_id) / "04_shot_plan/shot_plan.json", ShotPlan)
-    plan = optimize_shots(shot_plan, max_assets or brief.maximum_master_assets)
-    write_json(s.project_dir(project_id) / "05_master_assets/master_assets.json", plan)
-    reuse = {asset.asset_id: asset.linked_shots for asset in plan.assets}
-    write_json(s.project_dir(project_id) / "05_master_assets/reuse_matrix.json", reuse)
-    coverage = {
-        "shot_count": len(shot_plan.shots), "asset_count": len(plan.assets),
-        "maximum": plan.maximum_assets, "uncovered_shots": plan.uncovered_shots,
-    }
-    write_json(s.project_dir(project_id) / "05_master_assets/coverage_report.json", coverage)
-    s.transition(project_id, ProjectState.ASSET_PLAN_READY)
-    console.print(f"[green]Compressed {len(shot_plan.shots)} shots into {len(plan.assets)} assets[/green]")
-
-
-@app.command("generate-image-prompts")
-def image_prompts(project_id: str, workspace: Path = Path("projects")) -> None:
-    s = store(workspace)
-    plan_path = s.project_dir(project_id) / "05_master_assets/master_assets.json"
-    plan = load_model(plan_path, MasterAssetPlan)
-    shot_plan = load_model(s.project_dir(project_id) / "04_shot_plan/shot_plan.json", ShotPlan)
-    plan = generate_image_prompts(plan, shot_plan)
-    write_json(plan_path, plan)
-    for asset in plan.assets:
-        (s.project_dir(project_id) / f"05_master_assets/prompts/{asset.asset_id}.txt").write_text(asset.image_prompt + "\n", encoding="utf-8")
-    s.transition(project_id, ProjectState.IMAGE_GENERATION)
-    console.print(f"[green]Generated {len(plan.assets)} image prompts[/green]")
-
-
-@app.command("generate-media")
-def generate_media_cmd(
+@app.command("generate-voice")
+def generate_voice_cmd(
     project_id: str,
-    media_type: str = typer.Argument(..., help="image or video"),
-    asset_ids: str = typer.Option("", help="Comma-separated asset IDs; blank generates every pending asset"),
-    force: bool = typer.Option(False, help="Regenerate even when a candidate already exists"),
+    provider: str = typer.Option("gemini", help="gemini, elevenlabs, or mock"),
+    model: str = typer.Option(""),
+    voice: str = typer.Option(""),
+    paragraphs: str = typer.Option("", help="Comma-separated paragraph IDs; blank processes all"),
+    force: bool = typer.Option(False),
     workspace: Path = Path("projects"),
 ) -> None:
-    """Generate image or video assets through the routed native/manual/custom provider."""
-    if media_type not in {"image", "video"}:
-        raise typer.BadParameter("media_type must be image or video")
-    s = store(workspace)
-    project = s.project_dir(project_id)
-    brief = s.brief(project_id)
-    if media_type == "video" and not (project / "09_video_jobs/video_jobs.json").exists():
-        create_video_jobs(project, brief.master_video_duration_seconds)
-    os.environ["FDE_MEDIA_DURATION"] = str(brief.master_video_duration_seconds)
-    route = {
-        "provider": os.environ.get("FDE_MEDIA_PROVIDER", "mock"),
-        "model": os.environ.get("FDE_MEDIA_MODEL", "Deterministic Demo"),
-        "timeout_seconds": int(float(os.environ.get("FDE_MEDIA_TIMEOUT", "3600") or 3600)),
-        "retry_count": int(float(os.environ.get("FDE_MEDIA_RETRIES", "0") or 0)),
-        "media_command_template": os.environ.get("FDE_MEDIA_COMMAND", ""),
-        "fallback_provider": os.environ.get("FDE_MEDIA_FALLBACK_PROVIDER", ""),
-        "fallback_model": os.environ.get("FDE_MEDIA_FALLBACK_MODEL", ""),
-        "fallback_media_command_template": os.environ.get("FDE_MEDIA_FALLBACK_COMMAND", ""),
-    }
-    report = generate_project_media(
-        project, media_type=media_type, route=route,
-        asset_ids=[item.strip().upper() for item in asset_ids.split(",") if item.strip()],
-        force=force,
+    manifest = generate_voice_stage(
+        store(workspace), project_id, provider=provider, model=model or None, voice=voice or None,
+        paragraph_ids=_csv(paragraphs) or None, force=force,
     )
-    if report.get("generated"):
-        s.transition(project_id, ProjectState.IMAGE_REVIEW if media_type == "image" else ProjectState.VIDEO_REVIEW)
-    elif report.get("manual_required"):
-        s.transition(project_id, ProjectState.IMAGE_GENERATION if media_type == "image" else ProjectState.VIDEO_GENERATION)
-    console.print_json(data=report)
-    if report.get("failed") and not report.get("generated"):
-        raise typer.Exit(code=1)
+    console.print_json(data=manifest.model_dump(mode="json"))
 
 
-@app.command("import-images")
-def import_images_cmd(project_id: str, workspace: Path = Path("projects"), min_width: int = 1280) -> None:
-    s = store(workspace)
-    report = import_images(s.project_dir(project_id), min_width=min_width)
-    s.transition(project_id, ProjectState.IMAGE_REVIEW)
-    console.print_json(data=report)
-
-
-@app.command("contact-sheet")
-def contact_sheet(project_id: str, workspace: Path = Path("projects")) -> None:
-    paths = generate_contact_sheet(store(workspace).project_dir(project_id))
-    console.print_json(data=paths)
-
-
-@app.command("export-image-factory")
-def export_image_factory(
+@app.command("generate-timing")
+def generate_timing_cmd(
     project_id: str,
-    output_dir: Path | None = None,
+    allow_approximate: bool = typer.Option(False, help="Permit proportional fallback when Whisper is unavailable"),
     workspace: Path = Path("projects"),
 ) -> None:
-    """Create the one-upload production packet for the private Custom GPT."""
-    paths = export_image_factory_packet(store(workspace).project_dir(project_id), output_dir)
-    console.print_json(data=paths)
+    timing = generate_timing_stage(store(workspace), project_id, allow_approximate=allow_approximate)
+    console.print_json(data=timing.model_dump(mode="json"))
 
 
-@app.command("import-image-batch")
-def import_image_batch(
-    project_id: str,
-    batch_zip: Path,
-    workspace: Path = Path("projects"),
-    min_width: int = 1280,
-) -> None:
-    """Import and normalize a ZIP returned by the Documentary Image Factory GPT."""
+@app.command()
+def shots(project_id: str, agent: str = "deterministic", consume_response: bool = False, workspace: Path = Path("projects")) -> None:
+    _run_agent(lambda: generate_shots(store(workspace), project_id, agent, consume_response))
+
+
+@app.command("prepare-images")
+def prepare_images(project_id: str, workspace: Path = Path("projects")) -> None:
     s = store(workspace)
-    report = import_image_factory_batch(s.project_dir(project_id), batch_zip, min_width=min_width)
-    s.transition(project_id, ProjectState.IMAGE_REVIEW)
-    console.print_json(data=report)
+    manifest = prepare_media_jobs(s.project_dir(project_id), "image")
+    s.transition(project_id, ProjectState.IMAGES_GENERATING)
+    console.print_json(data=manifest.model_dump(mode="json"))
 
 
-@app.command("review-asset")
-def review_asset_cmd(
+@app.command("generate-images")
+def generate_images(
     project_id: str,
-    asset_id: str,
-    status: ReviewStatus,
-    instruction: str = "",
-    preserve: str = "",
-    target: str = "image",
+    shot_ids: str = typer.Option(""),
+    force: bool = typer.Option(False),
     workspace: Path = Path("projects"),
 ) -> None:
-    review_asset(
-        store(workspace), project_id, asset_id, status, instruction,
-        [x.strip() for x in preserve.split(",") if x.strip()], target,
-    )
-    console.print(f"[green]Saved {target} review for {asset_id}[/green]")
-
-
-@app.command("regenerate-asset")
-def regenerate_asset(project_id: str, asset_id: str, workspace: Path = Path("projects")) -> None:
     s = store(workspace)
-    path = s.project_dir(project_id) / "05_master_assets/master_assets.json"
-    plan = load_model(path, MasterAssetPlan)
-    asset = next((a for a in plan.assets if a.asset_id == asset_id), None)
-    if not asset:
-        raise typer.BadParameter(f"unknown asset {asset_id}")
-    instruction = asset.image_review.instruction
-    preserve = ", ".join(asset.image_review.preserve)
-    revision = (
-        asset.image_prompt + "\n\nREVISION REQUEST:\n" + instruction +
-        "\nPRESERVE WITHOUT CHANGE:\n" + (preserve or "all unmentioned approved properties")
-    )
-    version = asset.image_version + 1
-    out = s.project_dir(project_id) / f"05_master_assets/prompts/{asset_id}_revision_v{version:02d}.txt"
-    out.write_text(revision + "\n", encoding="utf-8")
-    console.print(f"[green]Created revision prompt[/green] {out}")
+    manifest = generate_media_jobs(s.project_dir(project_id), media_type="image", shot_ids=_csv(shot_ids) or None, force=force)
+    transition_after_media(s, project_id, "image", manifest)
+    console.print_json(data=manifest.model_dump(mode="json"))
 
 
-@app.command("validate-assets")
-def validate_assets(project_id: str, workspace: Path = Path("projects")) -> None:
+@app.command("approve-images")
+def approve_images(project_id: str, shot_ids: str = typer.Option(""), workspace: Path = Path("projects")) -> None:
     s = store(workspace)
-    summary = approval_summary(s.project_dir(project_id))
-    console.print_json(data=summary)
-    if summary["missing_images"] or summary["pending_image_reviews"] or summary["uncovered_shots"]:
-        raise typer.Exit(code=1)
-    project = s.project_dir(project_id)
-    paths = generate_contact_sheet(project)
-    plan = load_model(project / "05_master_assets/master_assets.json", MasterAssetPlan)
-    write_json(project / "07_review/approved_asset_manifest_v01.json", plan)
-    safe_copy(Path(paths["png"]), project / "07_review/approved_contact_sheet_v01.png")
-    s.transition(project_id, ProjectState.IMAGES_APPROVED)
+    manifest = approve_media(s.project_dir(project_id), media_type="image", shot_ids=_csv(shot_ids) or None)
+    if all(job.status == "approved" for job in manifest.jobs):
+        s.transition(project_id, ProjectState.IMAGES_APPROVED)
+    console.print_json(data=manifest.model_dump(mode="json"))
 
 
-@app.command("video-jobs")
-def video_jobs(project_id: str, workspace: Path = Path("projects")) -> None:
+@app.command("render-animatic")
+def render_animatic_cmd(project_id: str, workspace: Path = Path("projects")) -> None:
     s = store(workspace)
-    brief = s.brief(project_id)
-    manifest = create_video_jobs(s.project_dir(project_id), brief.master_video_duration_seconds)
-    s.transition(project_id, ProjectState.VIDEO_GENERATION)
-    console.print(f"[green]Created {len(manifest.jobs)} video jobs[/green]")
+    manifest = render_animatic(s.project_dir(project_id))
+    s.transition(project_id, ProjectState.ANIMATIC_READY)
+    console.print_json(data=manifest.model_dump(mode="json"))
 
 
-@app.command("import-videos")
-def import_videos_cmd(project_id: str, workspace: Path = Path("projects")) -> None:
+@app.command("approve-animatic")
+def approve_animatic_cmd(project_id: str, workspace: Path = Path("projects")) -> None:
     s = store(workspace)
-    brief = s.brief(project_id)
-    report = import_videos(s.project_dir(project_id), brief.master_video_duration_seconds)
-    s.transition(project_id, ProjectState.VIDEO_REVIEW)
-    console.print_json(data=report)
+    if not (s.project_dir(project_id) / "08_animatic/animatic.mp4").exists():
+        raise typer.BadParameter("render the animatic before approval")
+    s.transition(project_id, ProjectState.ANIMATIC_APPROVED)
+    console.print("[green]Approved animatic[/green]")
 
 
-@app.command("validate-videos")
-def validate_videos(project_id: str, workspace: Path = Path("projects")) -> None:
+@app.command("prepare-videos")
+def prepare_videos(project_id: str, workspace: Path = Path("projects")) -> None:
     s = store(workspace)
-    summary = approval_summary(s.project_dir(project_id))
-    console.print_json(data=summary)
-    if summary["missing_videos"] or summary["pending_video_reviews"]:
-        raise typer.Exit(code=1)
-    s.transition(project_id, ProjectState.VIDEOS_APPROVED)
+    manifest = prepare_media_jobs(s.project_dir(project_id), "video")
+    s.transition(project_id, ProjectState.VIDEOS_GENERATING)
+    console.print_json(data=manifest.model_dump(mode="json"))
 
 
-@app.command("create-variants")
-def variants(project_id: str, workspace: Path = Path("projects")) -> None:
-    manifest = create_variants(store(workspace).project_dir(project_id))
-    console.print(f"[green]Created variants for {len(manifest['assets'])} assets[/green]")
+@app.command("generate-videos")
+def generate_videos(
+    project_id: str,
+    shot_ids: str = typer.Option(""),
+    force: bool = typer.Option(False),
+    workspace: Path = Path("projects"),
+) -> None:
+    s = store(workspace)
+    if s.manifest(project_id).state not in {ProjectState.ANIMATIC_APPROVED, ProjectState.VIDEOS_GENERATING, ProjectState.VIDEOS_REVIEW}:
+        raise typer.BadParameter("approve the image-and-sound animatic before video generation")
+    manifest = generate_media_jobs(s.project_dir(project_id), media_type="video", shot_ids=_csv(shot_ids) or None, force=force)
+    transition_after_media(s, project_id, "video", manifest)
+    console.print_json(data=manifest.model_dump(mode="json"))
+
+
+@app.command("approve-videos")
+def approve_videos(project_id: str, shot_ids: str = typer.Option(""), workspace: Path = Path("projects")) -> None:
+    s = store(workspace)
+    manifest = approve_media(s.project_dir(project_id), media_type="video", shot_ids=_csv(shot_ids) or None)
+    if all(job.status in {"approved", "rejected"} for job in manifest.jobs):
+        s.transition(project_id, ProjectState.VIDEOS_APPROVED)
+    console.print_json(data=manifest.model_dump(mode="json"))
+
+
+@app.command("render-final-preview")
+def render_final_preview_cmd(project_id: str, workspace: Path = Path("projects")) -> None:
+    s = store(workspace)
+    output = render_final_preview(s.project_dir(project_id))
+    s.transition(project_id, ProjectState.FINAL_PREVIEW_READY)
+    console.print(f"[green]Rendered final preview[/green] {output}")
 
 
 @app.command("import-narration")
 def import_narration(
-    project_id: str, audio: Path, timestamps: Path | None = None,
+    project_id: str,
+    audio: Path,
     workspace: Path = Path("projects"),
 ) -> None:
+    """Manual fallback: import a complete WAV as the approved V1 voiceover."""
     s = store(workspace)
     project = s.project_dir(project_id)
-    suffix = audio.suffix.lower() or ".wav"
-    safe_copy(audio, project / f"11_narration/narration_master{suffix}")
-    if timestamps:
-        write_json(project / "11_narration/word_timestamps.json", read_json(timestamps))
-    s.transition(project_id, ProjectState.NARRATION_READY)
-    console.print("[green]Narration imported[/green]")
+    destination = project / "04_voice/voiceover_master.wav"
+    safe_copy(audio, destination)
+    write_json(project / "04_voice/manual_import.json", {"source": str(audio), "destination": str(destination.relative_to(project))})
+    s.transition(project_id, ProjectState.VOICE_REVIEW)
+    console.print("[green]Manual voiceover imported[/green]")
 
 
-@app.command("build-timeline")
-def build_timeline_cmd(project_id: str, workspace: Path = Path("projects")) -> None:
-    timeline = build_timeline(store(workspace).project_dir(project_id))
-    console.print(f"[green]Timeline: {len(timeline.entries)} entries, {timeline.total_seconds:.1f}s[/green]")
+# Compatibility command names retained while existing operator scripts migrate to V1.
+@app.command("generate-media")
+def generate_media_compat(
+    project_id: str,
+    media_type: str = typer.Argument(..., help="image or video"),
+    asset_ids: str = typer.Option("", help="Compatibility alias for shot IDs"),
+    force: bool = typer.Option(False),
+    workspace: Path = Path("projects"),
+) -> None:
+    if media_type == "image":
+        generate_images(project_id, shot_ids=asset_ids, force=force, workspace=workspace)
+    elif media_type == "video":
+        generate_videos(project_id, shot_ids=asset_ids, force=force, workspace=workspace)
+    else:
+        raise typer.BadParameter("media_type must be image or video")
+
+
+@app.command("validate-assets")
+def validate_assets_compat(project_id: str, workspace: Path = Path("projects")) -> None:
+    approve_images(project_id, workspace=workspace)
+
+
+@app.command("video-jobs")
+def video_jobs_compat(project_id: str, workspace: Path = Path("projects")) -> None:
+    prepare_videos(project_id, workspace=workspace)
+
+
+@app.command("validate-videos")
+def validate_videos_compat(project_id: str, workspace: Path = Path("projects")) -> None:
+    approve_videos(project_id, workspace=workspace)
 
 
 @app.command("render-preview")
-def render_preview(project_id: str, workspace: Path = Path("projects")) -> None:
-    s = store(workspace)
-    out = render(s.project_dir(project_id), preview=True, width=1280, height=720)
-    s.transition(project_id, ProjectState.PREVIEW_REVIEW)
-    console.print(f"[green]Rendered[/green] {out}")
+def render_preview_compat(project_id: str, workspace: Path = Path("projects")) -> None:
+    render_animatic_cmd(project_id, workspace=workspace)
 
 
 @app.command("render-final-base")
-def render_final(project_id: str, workspace: Path = Path("projects")) -> None:
-    s = store(workspace)
-    out = render(s.project_dir(project_id), preview=False, width=1920, height=1080)
-    s.transition(project_id, ProjectState.PICTURE_LOCKED)
-    console.print(f"[green]Rendered[/green] {out}")
+def render_final_compat(project_id: str, workspace: Path = Path("projects")) -> None:
+    render_final_preview_cmd(project_id, workspace=workspace)
+
+
+@app.command("build-timeline")
+def build_timeline_compat(project_id: str, workspace: Path = Path("projects")) -> None:
+    path = store(workspace).project_dir(project_id) / "06_shots/shot_plan.json"
+    if not path.exists():
+        raise typer.BadParameter("generate audio-led shots before building the timeline")
+    console.print_json(data=read_json(path))
+
+
+@app.command("create-variants")
+def create_variants_compat(project_id: str, workspace: Path = Path("projects")) -> None:
+    console.print("[yellow]V1 uses approved per-shot media directly; no variant stage is required.[/yellow]")
 
 
 @app.command("run")
@@ -361,7 +343,7 @@ def run_pipeline(
     consume_response: bool = False,
     workspace: Path = Path("projects"),
 ) -> None:
-    """Advance all automatic stages until the next human review gate."""
+    """Advance automatic V1 stages until the next approval or paid-media gate."""
     s = store(workspace)
     while True:
         state = s.manifest(project_id).state
@@ -370,49 +352,44 @@ def run_pipeline(
         elif state == ProjectState.RESEARCH_READY:
             _run_agent(lambda: generate_structure(s, project_id, agent, consume_response))
         elif state == ProjectState.STRUCTURE_REVIEW:
-            console.print("[yellow]Stopped: approve the structure with `fde approve-stage PROJECT structure`.[/yellow]")
+            console.print("[yellow]Stopped: approve the structure.[/yellow]")
             return
         elif state == ProjectState.STRUCTURE_APPROVED:
             _run_agent(lambda: generate_script(s, project_id, agent, consume_response))
-        elif state == ProjectState.SCRIPT_REVIEW:
-            console.print("[yellow]Stopped: approve the script with `fde approve-stage PROJECT script`.[/yellow]")
+        elif state == ProjectState.NARRATION_REVIEW:
+            console.print("[yellow]Stopped: approve the narration.[/yellow]")
             return
-        elif state == ProjectState.SCRIPT_APPROVED:
-            _run_agent(lambda: generate_shots(s, project_id, agent, consume_response))
-        elif state == ProjectState.SHOT_PLAN_READY:
-            brief = s.brief(project_id)
-            shot_plan = load_model(s.project_dir(project_id) / "04_shot_plan/shot_plan.json", ShotPlan)
-            plan = optimize_shots(shot_plan, brief.maximum_master_assets)
-            write_json(s.project_dir(project_id) / "05_master_assets/master_assets.json", plan)
-            s.transition(project_id, ProjectState.ASSET_PLAN_READY)
-        elif state == ProjectState.ASSET_PLAN_READY:
-            plan_path = s.project_dir(project_id) / "05_master_assets/master_assets.json"
-            plan = load_model(plan_path, MasterAssetPlan)
-            shot_plan = load_model(s.project_dir(project_id) / "04_shot_plan/shot_plan.json", ShotPlan)
-            plan = generate_image_prompts(plan, shot_plan)
-            write_json(plan_path, plan)
-            for asset in plan.assets:
-                (s.project_dir(project_id) / f"05_master_assets/prompts/{asset.asset_id}.txt").write_text(asset.image_prompt + "\n", encoding="utf-8")
-            s.transition(project_id, ProjectState.IMAGE_GENERATION)
-        elif state == ProjectState.IMAGE_GENERATION:
-            console.print("[yellow]Stopped: generate images, place them in the image inbox, and run `fde import-images`.[/yellow]")
+        elif state == ProjectState.NARRATION_APPROVED:
+            provider = os.getenv("FDE_VOICE_PROVIDER", "gemini")
+            generate_voice_stage(s, project_id, provider=provider)
+        elif state == ProjectState.VOICE_REVIEW:
+            console.print("[yellow]Stopped: review and approve the generated voice.[/yellow]")
             return
-        elif state == ProjectState.IMAGE_REVIEW:
-            console.print("[yellow]Stopped: review and approve all images, then run `fde validate-assets`.[/yellow]")
+        elif state == ProjectState.VOICE_APPROVED:
+            generate_timing_stage(s, project_id)
+            generate_shots(s, project_id)
+        elif state == ProjectState.SHOTS_REVIEW:
+            console.print("[yellow]Stopped: review and approve exact shot divisions.[/yellow]")
+            return
+        elif state == ProjectState.SHOTS_APPROVED:
+            prepare_media_jobs(s.project_dir(project_id), "image")
+            s.transition(project_id, ProjectState.IMAGES_GENERATING)
+            console.print("[yellow]Stopped: generate and approve shot images.[/yellow]")
             return
         elif state == ProjectState.IMAGES_APPROVED:
-            brief = s.brief(project_id)
-            create_video_jobs(s.project_dir(project_id), brief.master_video_duration_seconds)
-            s.transition(project_id, ProjectState.VIDEO_GENERATION)
-        elif state == ProjectState.VIDEO_GENERATION:
-            console.print("[yellow]Stopped: generate Grok videos, place them in the video inbox, and run `fde import-videos`.[/yellow]")
+            render_animatic(s.project_dir(project_id))
+            s.transition(project_id, ProjectState.ANIMATIC_READY)
+            console.print("[yellow]Stopped: review and approve the image-and-sound animatic.[/yellow]")
             return
-        elif state == ProjectState.VIDEO_REVIEW:
-            console.print("[yellow]Stopped: review all videos, then run `fde validate-videos`.[/yellow]")
+        elif state == ProjectState.ANIMATIC_APPROVED:
+            prepare_media_jobs(s.project_dir(project_id), "video")
+            s.transition(project_id, ProjectState.VIDEOS_GENERATING)
+            console.print("[yellow]Stopped: generate only the approved video shots.[/yellow]")
             return
         elif state == ProjectState.VIDEOS_APPROVED:
-            create_variants(s.project_dir(project_id))
-            console.print("[yellow]Variants are ready. Import narration and build the timeline.[/yellow]")
+            output = render_final_preview(s.project_dir(project_id))
+            s.transition(project_id, ProjectState.FINAL_PREVIEW_READY)
+            console.print(f"[green]Final preview ready[/green] {output}")
             return
         else:
             console.print(f"[yellow]No automatic transition configured from {state.value}.[/yellow]")
@@ -422,11 +399,11 @@ def run_pipeline(
 @app.command()
 def status(project_id: str, workspace: Path = Path("projects")) -> None:
     s = store(workspace)
-    manifest = s.manifest(project_id)
-    console.print_json(data=manifest.model_dump(mode="json"))
-    plan_path = s.project_dir(project_id) / "05_master_assets/master_assets.json"
-    if plan_path.exists():
-        console.print_json(data=approval_summary(s.project_dir(project_id)))
+    console.print_json(data=s.manifest(project_id).model_dump(mode="json"))
+    for relative in ("04_voice/audio_manifest.json", "05_timing/audio_timing.json", "06_shots/shot_plan.json", "07_images/jobs.json", "09_videos/jobs.json"):
+        path = s.project_dir(project_id) / relative
+        if path.exists():
+            console.print_json(data=read_json(path))
 
 
 @app.command()
@@ -436,20 +413,10 @@ def studio(
     workspace: Path = Path("projects"),
     project_id: str | None = None,
 ) -> None:
-    """Launch the modern local production studio."""
     import uvicorn
     from .studio.server import create_app
     query = f"?project={project_id}#production" if project_id else "#dashboard"
     console.print(f"Open http://{host}:{port}/{query}")
-    uvicorn.run(create_app(workspace), host=host, port=port)
-
-
-@app.command()
-def review(project_id: str, host: str = "127.0.0.1", port: int = 8765, workspace: Path = Path("projects")) -> None:
-    """Launch Studio directly in the asset-review workspace."""
-    import uvicorn
-    from .studio.server import create_app
-    console.print(f"Open http://{host}:{port}/?project={project_id}#assets")
     uvicorn.run(create_app(workspace), host=host, port=port)
 
 

@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
+DEFAULT_MAX_OUTPUT_TOKENS = 25_000
 _UNSUPPORTED_SCHEMA_CONSTRAINTS = frozenset({
     "exclusiveMaximum",
     "exclusiveMinimum",
@@ -65,7 +66,12 @@ def run_structured(
 
     payload = {
         "model": model or "claude-sonnet-5",
-        "max_tokens": 16000,
+        # Keep the structured shot response bounded, while allowing the
+        # caller/environment to lower it for smaller stages.
+        "max_tokens": max(
+            1,
+            int(float(os.environ.get("FDE_LLM_MAX_TOKENS", str(DEFAULT_MAX_OUTPUT_TOKENS)) or DEFAULT_MAX_OUTPUT_TOKENS)),
+        ),
         "messages": [{"role": "user", "content": prompt}],
         "output_config": {
             "effort": reasoning_effort if reasoning_effort in {"low", "medium", "high"} else "medium",

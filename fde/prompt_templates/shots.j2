@@ -1,12 +1,28 @@
-# Shot division task
+You are the visual director for a premium failure-investigation documentary.
 
-Project brief:
+Return strict JSON only matching ShotPlan. Do not use markdown or commentary.
+
+PROJECT BRIEF:
 {{ brief.model_dump_json(indent=2) }}
 
-Approved narration script:
+APPROVED RESEARCH:
+{{ research.model_dump_json(indent=2) }}
+
+APPROVED NARRATION:
 {{ script.model_dump_json(indent=2) }}
 
-Divide the narration into approximately 45–60 visual shots. Every narration segment must be covered.
-A shot is a visual beat, not a master generated asset. Describe visual purpose, visual type, camera,
-motion, overlays, and suspense function. Keep most shots 4–10 seconds; technical explanations may be
-longer. Return JSON only matching ShotPlan.
+IMMUTABLE AUDIO-LED SHOT SKELETON:
+{{ exact_shots.model_dump_json(indent=2) }}
+
+RULES:
+1. Return exactly the same shot IDs, in the same order.
+2. Preserve every shot's `start`, `end`, `duration`, `chapter_id`, `narration_ids`, and `narration_text` exactly.
+3. The generated voiceover and word alignment are the sole timing authority. Never merge, split, move, lengthen, or shorten a shot.
+4. Improve only the visual-direction fields: `visual_purpose`, `visual_type`, `suggested_visual`, `image_prompt`, `video_prompt`, `sound_hint`, `transition`, `camera`, `motion`, `overlay_requirements`, `suspense_function`, `requires_new_master_asset`, and `candidate_master_asset`.
+5. Keep imagery technically credible, evidence-led, restrained, and cinematic. Do not invent facts, damage, people, weather, instruments, documents, or locations not supported by research.
+6. Design a coherent visual sequence rather than isolated pretty images. Avoid repetitive aircraft silhouettes, generic control rooms, repeated maps, and constant slow pushes.
+7. `image_prompt` must identify the exact composition, environment, subject scale, lighting, continuity details, and 16:9 framing. Never request embedded captions or watermarks.
+8. `video_prompt` must animate the approved image with physically credible motion while preserving identity, geometry, lighting, and composition. State what must not change.
+9. Use still images deliberately when motion adds no value.
+10. `sound_hint` is one restrained semantic ambience or effect suggestion; narration remains dominant.
+11. Preserve `project_id`, `total_seconds`, and `voiceover_sha256` exactly.

@@ -4,6 +4,17 @@ STAGE_DIRECTORIES = [
     "00_input",
     "01_research",
     "02_structure",
+    "03_narration",
+    "04_voice/chapters",
+    "05_timing",
+    "06_shots",
+    "07_images",
+    "08_animatic/sfx",
+    "09_videos",
+    "10_final_preview",
+    "_jobs",
+    "_requests",
+    # Compatibility directories for projects created before the V1 audio-first flow.
     "03_script",
     "04_shot_plan",
     "05_master_assets/prompts",
@@ -22,7 +33,6 @@ STAGE_DIRECTORIES = [
     "12_timeline",
     "13_preview",
     "14_final",
-    "_requests",
 ]
 
 DEFAULT_GLOBAL_STYLE = (
@@ -31,4 +41,16 @@ DEFAULT_GLOBAL_STYLE = (
     "subtle amber practical highlights; realistic scale and movement; cinematic 16:9 composition; "
     "clear negative space for technical overlays; no embedded text, subtitles, watermark, fantasy "
     "lighting, sensational explosion, or gratuitous suffering."
+)
+
+DOCUMENTARY_PERFORMANCE_TAGS = (
+    "quietly investigative",
+    "curious",
+    "clear and measured",
+    "gentle emphasis",
+    "thinking pause",
+    "serious",
+    "with restrained urgency",
+    "somber",
+    "reflective",
 )
