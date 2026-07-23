@@ -180,10 +180,14 @@ def generate_shots(
     """Create immutable audio boundaries locally, then route only visual direction through the selected model."""
     store.transition(project_id, ProjectState.SHOTS_GENERATING)
     project = store.project_dir(project_id)
-    exact = plan_shots(project)
+    brief = store.brief(project_id)
+    # Generated source videos are five seconds long.  Keep every immutable
+    # editorial shot within that source duration; longer narration is split
+    # at audio-derived word/pause boundaries by plan_shots.
+    source_duration = min(5.0, brief.master_video_duration_seconds)
+    exact = plan_shots(project, target=max(1.0, source_duration - 0.5), maximum=source_duration)
     shots = exact
     if agent_kind not in {"deterministic", "mock"}:
-        brief = store.brief(project_id)
         research = load_model(project / "01_research/source_dossier.json", ResearchDossier)
         structure = load_model(project / "02_structure/structure.json", DocumentaryStructure)
         script_path = project / "03_narration/narration.json"

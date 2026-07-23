@@ -29,7 +29,10 @@ ACTION_COMMANDS: dict[str, list[str]] = {
     "consume_script": ["narration", "{project}", "--agent", "manual", "--consume-response"],
     "generate_voice": ["generate-voice", "{project}"],
     "generate_timing": ["generate-timing", "{project}"],
-    "shots": ["shots", "{project}"],
+    # Preserve the orchestrator-selected visual-director agent.  Without this
+    # placeholder the Studio resolves Claude/Codex/etc., but the CLI receives
+    # no --agent argument and silently falls back to its deterministic default.
+    "shots": ["shots", "{project}", "--agent", "{agent}"],
     "prepare_images": ["prepare-images", "{project}"],
     "generate_images": ["generate-images", "{project}"],
     "approve_images": ["approve-images", "{project}"],

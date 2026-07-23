@@ -50,8 +50,13 @@ def _boundaries(
             break
         result.append(round(chosen, 3))
         cursor = chosen
+    # Do not merge a short tail back into the previous shot when doing so
+    # would exceed the source-video duration.  A 3–4 second tail is valid;
+    # an overlong shot cannot be rendered from the five-second master clip.
     if end - result[-1] < minimum and len(result) > 1:
-        result.pop()
+        merged_duration = end - result[-2]
+        if merged_duration <= maximum + 0.001:
+            result.pop()
     result.append(round(end, 3))
     return result
 
@@ -66,8 +71,8 @@ def plan_shots(
     project_dir: Path,
     *,
     minimum: float = 3.0,
-    target: float = 6.0,
-    maximum: float = 10.0,
+    target: float = 4.5,
+    maximum: float = 5.0,
 ) -> ShotPlan:
     project_dir = Path(project_dir)
     if not timing_is_current(project_dir):
