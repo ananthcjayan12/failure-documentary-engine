@@ -1,0 +1,47 @@
+You are detailing one category of an already approved documentary visual vocabulary.
+
+Return strict JSON only matching MasterPackageDetailBatch. No markdown, commentary, error object, shot plan, image prompt or video prompt.
+
+CATEGORY TO DETAIL:
+{{ category }}
+
+APPROVED GLOBAL OUTLINE:
+{{ approved_outline.model_dump_json(indent=2) }}
+
+REQUESTED PACKAGE CARDS:
+[
+{% for item in requested_packages %}{{ item.model_dump_json(indent=2) }}{% if not loop.last %},{% endif %}
+{% endfor %}]
+
+ONLY THE RELEVANT COMPACT SHOTS:
+[
+{% for item in relevant_shots %}{{ item.model_dump_json(indent=2) }}{% if not loop.last %},{% endif %}
+{% endfor %}]
+
+ONLY THE RELEVANT APPROVED CLAIMS:
+{{ relevant_claims | tojson(indent=2) }}
+
+SOURCE-VIDEO STRATEGY:
+{{ strategy.model_dump_json(indent=2) }}
+
+TASK:
+Return detailed specifications for exactly the requested eight package IDs, in the same order. Expand the approved concept; do not redesign the global vocabulary.
+
+For every package return:
+- visual_concept;
+- factual_scope limited to the package's approved claim IDs;
+- composition and continuity requirements;
+- subject identity and geometry requirements;
+- prohibited details;
+- at least two named crop regions;
+- overlay-safe zones;
+- supported overlay families where relevant;
+- loop, camera, opening-frame, ending-frame and playback constraints;
+- reconstruction disclosure requirement when appropriate.
+
+CATEGORY RULES:
+- hero: one important physical or human moment, strong wide frame, stable detail crop, no invented spectacle;
+- atmosphere: stationary or nearly stationary, periodic natural motion, seamless loop, no unique one-time event;
+- investigation: controlled technical environment, replaceable screens, explicit factual boundary and reconstruction disclosure.
+
+Do not return linked shots, timing, narration, assignments, prompts, jobs or review status. Those remain local or come from the approved outline.

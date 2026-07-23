@@ -1,0 +1,34 @@
+You are resolving only the ambiguous visual assignments in a documentary edit.
+
+Return strict JSON only matching AssignmentBatch. No markdown, commentary, error object, full timeline, unchanged shot fields, image prompts or video prompts.
+
+APPROVED CANDIDATE ASSETS:
+{{ approved_assets | tojson(indent=2) }}
+
+AMBIGUOUS COMPACT SHOTS:
+[
+{% for item in ambiguous_shots %}{{ item.model_dump_json(indent=2) }}{% if not loop.last %},{% endif %}
+{% endfor %}]
+
+TOP LOCAL CANDIDATES AND SCORES:
+[
+{% for item in candidate_sets %}{{ item.model_dump_json(indent=2) }}{% if not loop.last %},{% endif %}
+{% endfor %}]
+
+NEIGHBOUR CONTEXT:
+{{ neighbour_context | tojson(indent=2) }}
+
+TASK:
+Choose one of the supplied top candidates for every ambiguous shot. Return only the compact assignment decisions.
+
+RULES:
+1. Return every requested shot_id exactly once and no other shot IDs.
+2. Select only an asset_id listed in that shot's candidate set.
+3. Do not change timing, narration, claims, chapter, story function or visual need.
+4. Choose only an allowed reuse operation and an existing crop_id.
+5. Keep source_in/source_out inside the approved source duration and playback_speed inside the asset range.
+6. Use neighbour context to avoid accidental consecutive repetition, while allowing deliberate callbacks.
+7. Use an overlay only when its family is supported by the selected asset and the spoken beat genuinely requires it.
+8. Prefer the highest-scoring candidate unless continuity, repetition or editorial clarity gives a concrete reason to select another.
+9. support_reason must be concise and specific. confidence must reflect genuine certainty.
+10. Never invent a new asset, shot, claim, overlay family or visual fact.
