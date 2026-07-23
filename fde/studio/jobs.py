@@ -43,28 +43,28 @@ ACTION_COMMANDS: dict[str, list[str]] = {
 ACTION_TASKS: dict[str, str] = {
     "research": "research",
     "structure": "structure",
-    "narration": "script",
-    "script": "script",
+    "narration": "narration_writer",
+    "script": "narration_writer",
     "generate_voice": "voice_generator",
-    "generate_timing": "timeline_builder",
+    "generate_timing": "word_alignment",
     "shots": "shot_planner",
     "prepare_images": "image_prompt_writer",
     "generate_images": "image_generator",
-    "render_animatic": "composition_renderer",
-    "prepare_videos": "animation_prompt_writer",
+    "render_animatic": "animatic_renderer",
+    "prepare_videos": "video_prompt_writer",
     "generate_videos": "video_generator",
-    "render_final_preview": "composition_renderer",
+    "render_final_preview": "final_renderer",
 }
 
 
 def _voice_provider(route: dict[str, Any] | None, config: dict[str, Any]) -> str:
-    if config.get("agent_mode") == "mock":
+    if config.get("agent_mode") == "mock" or (route or {}).get("provider") == "mock":
         return "mock"
-    provider = str((route or {}).get("provider") or "gemini").lower()
+    provider = str((route or {}).get("provider") or "google_tts").lower()
+    if provider == "manual_upload":
+        return "manual"
     if "eleven" in provider:
         return "elevenlabs"
-    if provider == "mock":
-        return "mock"
     return "gemini"
 
 
@@ -153,7 +153,15 @@ class JobManager:
                 selected_agent = config.get("agent_mode", "manual")
             command_parts = [part.format(project=project_id, agent=selected_agent) for part in command_template]
             if action == "generate_voice":
-                command_parts.extend(["--provider", _voice_provider(route, config)])
+                voice_provider = _voice_provider(route, config)
+                if voice_provider == "manual":
+                    raise RuntimeError("Manual Upload is selected for voice. Upload a WAV in the Voice stage instead of running generation.")
+                command_parts.extend(["--provider", voice_provider])
+                if route:
+                    if route.get("model"):
+                        command_parts.extend(["--model", str(route["model"])])
+                    if route.get("voice"):
+                        command_parts.extend(["--voice", str(route["voice"])])
             command = [sys.executable, "-m", "fde", *command_parts, "--workspace", str(self.workspace)]
             env = os.environ.copy()
             if route:
@@ -175,6 +183,13 @@ class JobManager:
                 env["FDE_MEDIA_MODEL"] = str(route.get("model", ""))
                 env["FDE_MEDIA_TIMEOUT"] = str(route.get("timeout_seconds", 3600))
                 env["FDE_MEDIA_COMMAND"] = str(route.get("media_command_template", ""))
+                env["FDE_MEDIA_QUALITY"] = str(route.get("quality", ""))
+                env["FDE_MEDIA_RESOLUTION"] = str(route.get("resolution", ""))
+                env["FDE_MEDIA_ASPECT_RATIO"] = str(route.get("aspect_ratio", "16:9"))
+                env["FDE_MEDIA_DURATION"] = str(route.get("duration_seconds", 0) or "")
+                env["FDE_VOICE_MODEL"] = str(route.get("model", ""))
+                env["FDE_VOICE_NAME"] = str(route.get("voice", ""))
+                env["FDE_WHISPER_MODEL"] = str(route.get("model", "base.en")) if task_id == "word_alignment" else env.get("FDE_WHISPER_MODEL", "base.en")
             elif config.get("command_template"):
                 env["FDE_LLM_COMMAND"] = str(config["command_template"])
             log_path = self.log_path(project_id)
@@ -193,25 +208,18 @@ class JobManager:
             )
             self._processes[project_id] = process
             state = {
-                "status": "running",
-                "action": action,
-                "label": action.replace("_", " ").title(),
-                "started_at": utc_now(),
-                "ended_at": None,
-                "return_code": None,
-                "error": None,
-                "pid": process.pid,
+                "status": "running", "action": action,
+                "label": action.replace("_", " ").title(), "started_at": utc_now(),
+                "ended_at": None, "return_code": None, "error": None, "pid": process.pid,
                 "routing": ({
-                    "task_id": task_id,
-                    "provider": route.get("provider"),
-                    "provider_label": route.get("provider_label"),
-                    "model": route.get("model"),
+                    "task_id": task_id, "provider": route.get("provider"),
+                    "provider_label": route.get("provider_label"), "model": route.get("model"),
                     "reasoning_effort": route.get("reasoning_effort"),
-                    "fallback_provider": route.get("fallback_provider"),
-                    "fallback_model": route.get("fallback_model"),
-                    "capability": route.get("capability"),
-                    "adapter": route.get("provider_adapter"),
-                    "matched_rule": route.get("matched_rule"),
+                    "quality": route.get("quality"), "resolution": route.get("resolution"),
+                    "aspect_ratio": route.get("aspect_ratio"), "duration_seconds": route.get("duration_seconds"),
+                    "voice": route.get("voice"), "fallback_provider": route.get("fallback_provider"),
+                    "fallback_model": route.get("fallback_model"), "capability": route.get("capability"),
+                    "adapter": route.get("provider_adapter"), "matched_rule": route.get("matched_rule"),
                 } if route else None),
             }
             write_json(self.state_path(project_id), state)
@@ -240,9 +248,7 @@ class JobManager:
         log_handle.close()
         status = "completed" if return_code == 0 else "waiting" if return_code == 2 else "failed"
         state.update({
-            "status": status,
-            "ended_at": utc_now(),
-            "return_code": return_code,
+            "status": status, "ended_at": utc_now(), "return_code": return_code,
             "error": None if return_code in {0, 2} else f"Command exited with status {return_code}",
         })
         write_json(self.state_path(project_id), state)
