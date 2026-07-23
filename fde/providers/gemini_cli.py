@@ -68,9 +68,10 @@ def run_structured(
         "Do not use markdown fences, commentary, tools, or file edits.\n\n"
         f"JSON SCHEMA\n{schema_text}\n\nTASK\n{prompt}"
     )
+    # `--model`, `--output-format json`, and `-p` are the stable documented headless flags.
+    # Workspace trust and approval defaults stay under the user's Gemini CLI configuration.
     command = [
-        gemini_binary(), "--model", model or "auto", "--output-format", "json",
-        "--approval-mode", "plan", "--skip-trust", "-p", full_prompt,
+        gemini_binary(), "--model", model or "auto", "--output-format", "json", "-p", full_prompt,
     ]
     completed = subprocess.run(
         command,
