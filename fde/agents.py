@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import shlex
 import subprocess
@@ -11,10 +10,6 @@ from typing import Any
 from pydantic import BaseModel
 
 from .io import atomic_write_text, read_json, write_json
-from .providers.anthropic_api import run_structured as run_anthropic_structured
-from .providers.gemini_api import run_structured as run_gemini_structured
-from .providers.grok_cli import run_structured as run_grok_structured
-from .providers.kimi_api import run_structured as run_kimi_structured
 from .models import (
     Chapter,
     Claim,
@@ -26,6 +21,11 @@ from .models import (
     ShotPlan,
     SourceRef,
 )
+from .providers.anthropic_api import run_structured as run_anthropic_structured
+from .providers.gemini_api import run_structured as run_gemini_structured
+from .providers.gemini_cli import run_structured as run_gemini_cli_structured
+from .providers.grok_cli import run_structured as run_grok_structured
+from .providers.kimi_api import run_structured as run_kimi_structured
 
 
 class AgentPending(RuntimeError):
@@ -38,6 +38,14 @@ class StructuredAgent(ABC):
         raise NotImplementedError
 
 
+def _prompt_pack(prompt: str) -> str:
+    pack_id = os.environ.get("FDE_PROMPT_PACK_ID", "")
+    instructions = os.environ.get("FDE_PROMPT_PACK_INSTRUCTIONS", "").strip()
+    if not instructions:
+        return prompt
+    return f"# Active prompt pack: {pack_id or 'workspace default'}\n\n{instructions}\n\n---\n\n{prompt}"
+
+
 class ManualAgent(StructuredAgent):
     def __init__(self, consume_response: bool = False) -> None:
         self.consume_response = consume_response
@@ -47,14 +55,13 @@ class ManualAgent(StructuredAgent):
         prompt_path = request_dir / f"{stage}_prompt.md"
         response_path = request_dir / f"{stage}_response.json"
         schema_path = request_dir / f"{stage}_schema.json"
-        atomic_write_text(prompt_path, prompt)
+        atomic_write_text(prompt_path, _prompt_pack(prompt))
         write_json(schema_path, output_model.model_json_schema())
         if self.consume_response and response_path.exists():
             return output_model.model_validate(read_json(response_path))
         raise AgentPending(
             f"Manual response required. Prompt: {prompt_path}\n"
-            f"Save JSON to: {response_path}\n"
-            "Then rerun with --consume-response."
+            f"Save JSON to: {response_path}\nThen rerun with --consume-response."
         )
 
 
@@ -68,78 +75,49 @@ class CommandAgent(StructuredAgent):
         request_dir.mkdir(parents=True, exist_ok=True)
         prompt_path = request_dir / f"{stage}_prompt.md"
         output_path = request_dir / f"{stage}_response.json"
-        pack_id = os.environ.get("FDE_PROMPT_PACK_ID", "")
-        pack_instructions = os.environ.get("FDE_PROMPT_PACK_INSTRUCTIONS", "").strip()
-        routed_prompt = prompt
-        if pack_instructions:
-            routed_prompt = f"# Active prompt pack: {pack_id or 'workspace default'}\n\n{pack_instructions}\n\n---\n\n{prompt}"
-        atomic_write_text(prompt_path, routed_prompt)
-        model = os.environ.get("FDE_LLM_MODEL", "")
-        fallback_model = os.environ.get("FDE_LLM_FALLBACK_MODEL", "")
-        reasoning = os.environ.get("FDE_LLM_REASONING", "medium")
-        temperature = os.environ.get("FDE_LLM_TEMPERATURE", "0.2")
+        atomic_write_text(prompt_path, _prompt_pack(prompt))
         timeout = max(1, int(float(os.environ.get("FDE_LLM_TIMEOUT", "900") or 900)))
         retries = max(0, int(float(os.environ.get("FDE_LLM_RETRIES", "0") or 0)))
-        fallback_template = os.environ.get("FDE_LLM_FALLBACK_COMMAND", "").strip()
-        attempts: list[tuple[str, str, str]] = [
-            (self.command_template, model, f"primary attempt {attempt + 1}") for attempt in range(retries + 1)
+        attempts = [
+            (self.command_template, os.environ.get("FDE_LLM_MODEL", ""), f"primary attempt {index + 1}")
+            for index in range(retries + 1)
         ]
+        fallback_template = os.environ.get("FDE_LLM_FALLBACK_COMMAND", "").strip()
         if fallback_template:
-            attempts.append((fallback_template, fallback_model or model, "fallback"))
+            attempts.append((
+                fallback_template,
+                os.environ.get("FDE_LLM_FALLBACK_MODEL") or os.environ.get("FDE_LLM_MODEL", ""),
+                "fallback",
+            ))
         failures: list[str] = []
-        for template, selected_model, label in attempts:
+        for template, model, label in attempts:
             output_path.unlink(missing_ok=True)
-            command = template.format(
-                prompt=shlex.quote(str(prompt_path)), output=shlex.quote(str(output_path)),
-                model=shlex.quote(selected_model), reasoning=shlex.quote(reasoning),
-                temperature=shlex.quote(str(temperature)), timeout=shlex.quote(str(timeout)),
-                stage=shlex.quote(stage),
-            )
             try:
-                completed = subprocess.run(command, shell=True, text=True, capture_output=True, timeout=timeout)
-            except subprocess.TimeoutExpired as exc:
-                failures.append(f"{label}: timed out after {timeout}s ({exc})")
-                continue
-            if completed.returncode != 0:
-                failures.append(f"{label}: command failed ({completed.returncode})\nSTDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}")
-                continue
-            if not output_path.exists() and completed.stdout.strip():
-                atomic_write_text(output_path, completed.stdout.strip())
-            if not output_path.exists():
-                failures.append(f"{label}: command produced no response file or stdout JSON")
-                continue
-            try:
-                return output_model.model_validate(read_json(output_path))
+                value = RoutedAgent._command_once(
+                    template=template, stage=stage, prompt_path=prompt_path,
+                    output_path=output_path, model=model, timeout=timeout,
+                )
+                return output_model.model_validate(value)
             except Exception as exc:
-                failures.append(f"{label}: invalid structured response: {exc}")
-        raise RuntimeError("all routed agent attempts failed\n\n" + "\n\n".join(failures))
+                failures.append(f"{label}: {exc}")
+        raise RuntimeError("all command-agent attempts failed\n\n" + "\n\n".join(failures))
 
 
 class GrokCLIAgent(StructuredAgent):
-    """Native Grok Build CLI adapter with streaming-JSON recovery."""
-
     def run(self, *, stage: str, prompt: str, output_model: type[BaseModel], request_dir: Path) -> BaseModel:
         request_dir.mkdir(parents=True, exist_ok=True)
-        prompt_path = request_dir / f"{stage}_prompt.md"
         output_path = request_dir / f"{stage}_response.json"
-        schema_path = request_dir / f"{stage}_schema.json"
-        pack_id = os.environ.get("FDE_PROMPT_PACK_ID", "")
-        pack_instructions = os.environ.get("FDE_PROMPT_PACK_INSTRUCTIONS", "").strip()
-        routed_prompt = prompt
-        if pack_instructions:
-            routed_prompt = f"# Active prompt pack: {pack_id or 'workspace default'}\n\n{pack_instructions}\n\n---\n\n{prompt}"
-        atomic_write_text(prompt_path, routed_prompt)
         schema = output_model.model_json_schema()
-        write_json(schema_path, schema)
+        write_json(request_dir / f"{stage}_schema.json", schema)
         timeout = max(1, int(float(os.environ.get("FDE_LLM_TIMEOUT", "1800") or 1800)))
         retries = max(0, int(float(os.environ.get("FDE_LLM_RETRIES", "0") or 0)))
-        model = os.environ.get("FDE_LLM_MODEL", "authenticated-default")
         failures: list[str] = []
         for attempt in range(retries + 1):
             try:
                 value = run_grok_structured(
-                    prompt=routed_prompt, schema=schema, destination=output_path,
-                    cwd=request_dir.parent, model=model, timeout=timeout,
+                    prompt=_prompt_pack(prompt), schema=schema, destination=output_path,
+                    cwd=request_dir.parent, model=os.environ.get("FDE_LLM_MODEL", "authenticated-default"),
+                    timeout=timeout,
                 )
                 return output_model.model_validate(value)
             except Exception as exc:
@@ -148,7 +126,7 @@ class GrokCLIAgent(StructuredAgent):
 
 
 class RoutedAgent(StructuredAgent):
-    """Provider-agnostic structured executor used by Studio task routes."""
+    """Execute the primary and fallback routes selected by the Studio orchestrator."""
 
     def __init__(self, context: dict[str, Any], consume_response: bool = False) -> None:
         self.context = context
@@ -159,11 +137,7 @@ class RoutedAgent(StructuredAgent):
         prompt_path = request_dir / f"{stage}_prompt.md"
         output_path = request_dir / f"{stage}_response.json"
         schema_path = request_dir / f"{stage}_schema.json"
-        pack_id = os.environ.get("FDE_PROMPT_PACK_ID", "")
-        pack_instructions = os.environ.get("FDE_PROMPT_PACK_INSTRUCTIONS", "").strip()
-        routed_prompt = prompt
-        if pack_instructions:
-            routed_prompt = f"# Active prompt pack: {pack_id or 'workspace default'}\n\n{pack_instructions}\n\n---\n\n{prompt}"
+        routed_prompt = _prompt_pack(prompt)
         atomic_write_text(prompt_path, routed_prompt)
         schema = output_model.model_json_schema()
         write_json(schema_path, schema)
@@ -201,9 +175,17 @@ class RoutedAgent(StructuredAgent):
         raise RuntimeError("all routed agent attempts failed\n\n" + "\n\n".join(failures))
 
     def _execute(
-        self, *, item: dict[str, str], stage: str, prompt: str, prompt_path: Path,
-        output_path: Path, schema: dict[str, Any], output_model: type[BaseModel],
-        request_dir: Path, timeout: int,
+        self,
+        *,
+        item: dict[str, str],
+        stage: str,
+        prompt: str,
+        prompt_path: Path,
+        output_path: Path,
+        schema: dict[str, Any],
+        output_model: type[BaseModel],
+        request_dir: Path,
+        timeout: int,
     ) -> dict[str, Any]:
         adapter = item.get("adapter") or "command"
         model = item.get("model") or ""
@@ -212,6 +194,11 @@ class RoutedAgent(StructuredAgent):
             return run_grok_structured(
                 prompt=prompt, schema=schema, destination=output_path,
                 cwd=request_dir.parent, model=model or "authenticated-default", timeout=timeout,
+            )
+        if adapter == "gemini_cli":
+            return run_gemini_cli_structured(
+                prompt=prompt, schema=schema, destination=output_path,
+                cwd=request_dir.parent, model=model or "auto", timeout=timeout,
             )
         if adapter == "anthropic_api":
             return run_anthropic_structured(
@@ -237,13 +224,13 @@ class RoutedAgent(StructuredAgent):
                 output_path=output_path, model=model, timeout=timeout,
             )
         if adapter == "mock":
-            value = MockAgent(self.context).run(stage=stage, prompt=prompt, output_model=output_model, request_dir=request_dir)
-            return value.model_dump(mode="json")
+            return MockAgent(self.context).run(
+                stage=stage, prompt=prompt, output_model=output_model, request_dir=request_dir,
+            ).model_dump(mode="json")
         if adapter == "manual":
-            value = ManualAgent(consume_response=self.consume_response).run(
-                stage=stage, prompt=prompt, output_model=output_model, request_dir=request_dir
-            )
-            return value.model_dump(mode="json")
+            return ManualAgent(consume_response=self.consume_response).run(
+                stage=stage, prompt=prompt, output_model=output_model, request_dir=request_dir,
+            ).model_dump(mode="json")
         raise RuntimeError(f"Unsupported structured adapter: {adapter}")
 
     @staticmethod
@@ -259,7 +246,7 @@ class RoutedAgent(StructuredAgent):
         )
         completed = subprocess.run(command, shell=True, text=True, capture_output=True, timeout=timeout)
         (output_path.parent / f"{stage}-command-output.log").write_text(
-            (completed.stdout or "") + "\n" + (completed.stderr or ""), encoding="utf-8"
+            (completed.stdout or "") + "\n" + (completed.stderr or ""), encoding="utf-8",
         )
         if completed.returncode != 0:
             raise RuntimeError(f"command failed ({completed.returncode}): {(completed.stderr or completed.stdout)[-4000:]}")
@@ -313,7 +300,9 @@ class MockAgent(StructuredAgent):
                     reveal=f"A new detail changes the understanding of {name.lower()}.",
                     ending_hook="But the next piece of evidence raises a deeper question.",
                 ))
-            return DocumentaryStructure(project_id=project_id, title=title, chapters=chapters, total_target_seconds=duration)
+            return DocumentaryStructure(
+                project_id=project_id, title=title, chapters=chapters, total_target_seconds=duration,
+            )
         if output_model is DocumentaryScript:
             structure = self.context.get("structure")
             chapters = structure.chapters if structure else []
@@ -321,7 +310,7 @@ class MockAgent(StructuredAgent):
             cursor = 0.0
             words = 0
             for chapter in chapters:
-                for _local in range(1, 4):
+                for _ in range(3):
                     text = (
                         f"This is demonstration narration for {chapter.title}. "
                         "It explains the evidence carefully, separates confirmed facts from theory, "
@@ -341,36 +330,35 @@ class MockAgent(StructuredAgent):
                 estimated_total_seconds=cursor, estimated_word_count=words,
             )
         if output_model is ShotPlan:
+            exact = self.context.get("exact_shots")
+            if exact is not None:
+                return exact.model_copy(deep=True)
             script = self.context.get("script")
             shots: list[Shot] = []
             for segment in script.segments:
                 half = segment.estimated_duration / 2
                 for part in range(2):
-                    idx = len(shots) + 1
+                    index = len(shots) + 1
                     visual_types = ["flight_reconstruction", "technical_map", "investigation_room", "atmosphere"]
-                    vtype = visual_types[idx % len(visual_types)]
+                    visual_type = visual_types[index % len(visual_types)]
                     shots.append(Shot(
-                        shot_id=f"S{idx:03d}", chapter_id=segment.chapter_id,
+                        shot_id=f"S{index:03d}", chapter_id=segment.chapter_id,
                         narration_ids=[segment.narration_id], start=segment.estimated_start + part * half,
                         duration=half, visual_purpose=f"Support {segment.narration_id} with a distinct visual beat.",
-                        visual_type=vtype, suggested_visual=f"Reusable {vtype.replace('_', ' ')} scene for {segment.chapter_id}",
+                        visual_type=visual_type,
+                        suggested_visual=f"Reusable {visual_type.replace('_', ' ')} scene for {segment.chapter_id}",
                         camera="Stable cinematic composition", motion="Subtle controlled movement",
-                        overlay_requirements=["time", "evidence label"] if idx % 3 == 0 else [],
-                        suspense_function="reveal" if idx % 7 == 0 else "support",
+                        overlay_requirements=["time", "evidence label"] if index % 3 == 0 else [],
+                        suspense_function="reveal" if index % 7 == 0 else "support",
                     ))
             return ShotPlan(project_id=project_id, shots=shots, total_seconds=script.estimated_total_seconds)
         raise ValueError(f"mock agent has no generator for {output_model.__name__}")
 
 
 def get_agent(kind: str, context: dict[str, Any], consume_response: bool = False) -> StructuredAgent:
-    if kind == "manual":
-        return ManualAgent(consume_response=consume_response)
-    if kind == "command":
-        return CommandAgent()
-    if kind == "grok":
-        return GrokCLIAgent()
-    if kind == "routed":
-        return RoutedAgent(context, consume_response=consume_response)
-    if kind == "mock":
-        return MockAgent(context)
+    if kind == "manual": return ManualAgent(consume_response=consume_response)
+    if kind == "command": return CommandAgent()
+    if kind == "grok": return GrokCLIAgent()
+    if kind == "routed": return RoutedAgent(context, consume_response=consume_response)
+    if kind == "mock": return MockAgent(context)
     raise ValueError(f"unknown agent: {kind}")
