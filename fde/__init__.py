@@ -2,6 +2,6 @@
 
 __version__ = "0.6.0"
 
-# Importing the routing overlay mutates the provider task graph before Studio,
-# CLI, or tests import the public orchestrator helpers.
+# Package-wide compatibility and routing overlays must load before public modules.
 from . import orchestrator_two_pass as _orchestrator_two_pass  # noqa: F401,E402
+from . import visual_compat as _visual_compat  # noqa: F401,E402
