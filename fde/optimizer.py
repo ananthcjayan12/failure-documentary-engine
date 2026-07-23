@@ -1,70 +1,107 @@
 from __future__ import annotations
 
-from .master_footage import deterministic_master_plan
+from collections import Counter
+
 from .models import (
+    CropRegion,
+    DisclosureLabel,
+    MasterAsset,
     MasterAssetPlan,
     MasterFootageStrategy,
-    ProjectBrief,
     ShotPlan,
-    ShotSkeleton,
-    ShotSkeletonPlan,
 )
 
 
-def _legacy_strategy(maximum_assets: int) -> MasterFootageStrategy:
-    count = max(1, maximum_assets)
-    hero = max(1, count // 3) if count >= 3 else 1
-    remaining = count - hero
-    atmosphere = max(0, remaining // 2)
-    investigation = max(0, remaining - atmosphere)
-    if count == 1:
-        atmosphere = investigation = 0
-    return MasterFootageStrategy(
-        hero_count=hero,
-        atmosphere_count=atmosphere,
-        investigation_count=investigation,
-        target_generated_video_count=count,
-        enforce_exact_counts=True,
-    )
+CATEGORY_ORDER = ("hero", "atmosphere", "investigation")
+CATEGORY_PREFIX = {"hero": "H", "atmosphere": "L", "investigation": "E"}
 
 
 def optimize_shots(shot_plan: ShotPlan, maximum_assets: int) -> MasterAssetPlan:
-    """Compatibility wrapper for callers of the removed semantic-clustering API.
+    """Compatibility replacement for the removed text-similarity optimizer.
 
-    Production uses `plan_master_footage()` with the explicit 8 / 8 / 8 strategy.
-    Older tests and projects may still request a smaller safety limit; they receive a
-    deterministic legacy proposal rather than semantic text-similarity clustering.
+    Production uses the reviewed `plan_master_footage()` flow. This function exists
+    only for older callers: it deterministically partitions every legacy shot exactly
+    once across at most `maximum_assets`, preserving the previous hard-limit and
+    coverage contract without reintroducing semantic clustering.
     """
-    skeleton = ShotSkeletonPlan(
-        project_id=shot_plan.project_id,
-        total_seconds=shot_plan.total_seconds,
-        voiceover_sha256=shot_plan.voiceover_sha256,
-        timing_source="legacy_shot_plan_compatibility",
-        shots=[
-            ShotSkeleton(
-                shot_id=item.shot_id,
-                chapter_id=item.chapter_id,
-                narration_ids=item.narration_ids,
-                claim_ids=item.claim_ids,
-                start=item.start,
-                end=item.end or item.start + item.duration,
-                duration=item.duration,
-                narration_text=item.narration_text,
-                visual_purpose=item.visual_purpose,
-                story_function=item.story_function or item.suspense_function,
-                factual_scope=item.factual_scope or item.claim_ids,
+    if maximum_assets < 1:
+        raise ValueError("maximum_assets must be at least one")
+    if not shot_plan.shots:
+        return MasterAssetPlan(
+            project_id=shot_plan.project_id,
+            maximum_assets=maximum_assets,
+            strategy=MasterFootageStrategy(
+                hero_count=1,
+                atmosphere_count=0,
+                investigation_count=0,
+                target_generated_video_count=1,
+            ),
+            status="legacy",
+            assets=[],
+            uncovered_shots=[],
+        )
+    asset_count = min(maximum_assets, len(shot_plan.shots))
+    groups: list[list] = [[] for _ in range(asset_count)]
+    for index, shot in enumerate(shot_plan.shots):
+        groups[index % asset_count].append(shot)
+
+    counts: Counter[str] = Counter()
+    assets: list[MasterAsset] = []
+    for group_index, linked in enumerate(groups):
+        first = linked[0]
+        category = CATEGORY_ORDER[group_index % len(CATEGORY_ORDER)]
+        counts[category] += 1
+        asset_id = f"{CATEGORY_PREFIX[category]}{counts[category]:02d}"
+        claim_ids = list(dict.fromkeys(claim for shot in linked for claim in shot.claim_ids))
+        crop_regions = [
+            CropRegion(crop_id="wide", description="Full reusable landscape frame"),
+            CropRegion(crop_id="detail", description="Stable secondary detail crop"),
+        ]
+        assets.append(
+            MasterAsset(
+                asset_id=asset_id,
+                title=first.suggested_visual or first.visual_purpose or asset_id,
+                category=category,
+                linked_shots=[shot.shot_id for shot in linked],
+                primary_use=first.visual_purpose or first.suggested_visual,
+                secondary_uses=[
+                    shot.visual_purpose
+                    for shot in linked[1:]
+                    if shot.visual_purpose and shot.visual_purpose != first.visual_purpose
+                ],
+                required_reuse_count=len(linked),
+                factual_scope=claim_ids,
+                factual_context_id=first.chapter_id or f"legacy_{group_index:02d}",
+                source_duration_seconds=5,
+                loopable=category == "atmosphere",
+                seamless_loop_required=category == "atmosphere",
+                camera_stationary=category == "atmosphere",
+                maximum_continuous_use_seconds=25 if category == "atmosphere" else 15,
+                allowed_operations=(
+                    ["full_frame", "crop", "loop", "slow", "freeze", "overlay_background"]
+                    if category == "atmosphere"
+                    else ["full_frame", "crop", "slow", "freeze", "callback"]
+                ),
+                crop_regions=crop_regions,
+                major_story_moment=category == "hero",
+                reconstruction_disclosure=(
+                    DisclosureLabel(required=True) if category == "investigation" else None
+                ),
+                reuse_rationale="Legacy deterministic partition preserving exact one-time shot coverage.",
             )
-            for item in shot_plan.shots
-        ],
+        )
+    strategy = MasterFootageStrategy(
+        hero_count=counts["hero"],
+        atmosphere_count=counts["atmosphere"],
+        investigation_count=counts["investigation"],
+        target_generated_video_count=asset_count,
+        enforce_exact_counts=True,
     )
-    strategy = MasterFootageStrategy() if maximum_assets >= 24 else _legacy_strategy(maximum_assets)
-    brief = ProjectBrief(
+    return MasterAssetPlan(
         project_id=shot_plan.project_id,
-        title=shot_plan.project_id,
-        topic=shot_plan.project_id,
-        maximum_master_assets=maximum_assets,
-        master_footage_strategy=strategy,
+        maximum_assets=maximum_assets,
+        strategy=strategy,
+        status="legacy",
+        assets=assets,
+        uncovered_shots=[],
     )
-    plan = deterministic_master_plan(brief, skeleton)
-    plan.status = "legacy"
-    return plan
