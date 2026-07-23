@@ -11,6 +11,7 @@ from .models import (
     DocumentaryStructure,
     ProjectState,
     ResearchDossier,
+    Shot,
     ShotPlan,
 )
 from .narration import clean_spoken_text, generate_voice, performance_tags, validate_tagged_text
@@ -100,7 +101,6 @@ def generate_script(store: ProjectStore, project_id: str, agent_kind: str, consu
         "\n\n".join(clean_spoken_text(item.text) for item in script.segments).rstrip() + "\n",
         encoding="utf-8",
     )
-    # Compatibility mirror for the existing report and manual-response tools.
     write_json(project / "03_script/script.json", script)
     (project / "03_script/script.md").write_text(script_markdown(script), encoding="utf-8")
     store.transition(project_id, ProjectState.NARRATION_REVIEW)
@@ -132,8 +132,35 @@ def generate_timing_stage(
     *,
     allow_approximate: bool | None = None,
 ) -> AudioTiming:
-    timing = derive_timing(store.project_dir(project_id), allow_approximate=allow_approximate)
-    return timing
+    return derive_timing(store.project_dir(project_id), allow_approximate=allow_approximate)
+
+
+_VISUAL_FIELDS = (
+    "visual_purpose", "visual_type", "suggested_visual", "image_prompt", "video_prompt",
+    "sound_hint", "transition", "camera", "motion", "overlay_requirements",
+    "suspense_function", "requires_new_master_asset", "candidate_master_asset",
+)
+
+
+def _apply_visual_direction(exact: ShotPlan, directed: ShotPlan) -> ShotPlan:
+    if directed.project_id != exact.project_id:
+        raise RuntimeError("visual director changed project_id")
+    if [item.shot_id for item in directed.shots] != [item.shot_id for item in exact.shots]:
+        raise RuntimeError("visual director must return every immutable shot ID in the original order")
+    directed_by_id = {item.shot_id: item for item in directed.shots}
+    final: list[Shot] = []
+    for skeleton in exact.shots:
+        proposal = directed_by_id[skeleton.shot_id]
+        preserved = skeleton.model_copy(deep=True)
+        for field in _VISUAL_FIELDS:
+            setattr(preserved, field, getattr(proposal, field))
+        final.append(preserved)
+    return ShotPlan(
+        project_id=exact.project_id,
+        shots=final,
+        total_seconds=exact.total_seconds,
+        voiceover_sha256=exact.voiceover_sha256,
+    )
 
 
 def generate_shots(
@@ -142,17 +169,43 @@ def generate_shots(
     agent_kind: str = "deterministic",
     consume_response: bool = False,
 ) -> ShotPlan:
-    """Plan exact shots from the current generated voice timing.
-
-    `agent_kind` and `consume_response` remain in the signature so existing Studio actions keep
-    working, but V1 deliberately uses the deterministic VCJ-style timing compiler.
-    """
-    del agent_kind, consume_response
+    """Create immutable audio boundaries locally, then route only visual direction through the selected model."""
     store.transition(project_id, ProjectState.SHOTS_GENERATING)
-    shots = plan_shots(store.project_dir(project_id))
-    version = store.next_version(project_id, "shots")
     project = store.project_dir(project_id)
+    exact = plan_shots(project)
+    shots = exact
+    if agent_kind not in {"deterministic", "mock"}:
+        brief = store.brief(project_id)
+        research = load_model(project / "01_research/source_dossier.json", ResearchDossier)
+        structure = load_model(project / "02_structure/structure.json", DocumentaryStructure)
+        script_path = project / "03_narration/narration.json"
+        if not script_path.exists():
+            script_path = project / "03_script/script.json"
+        script = load_model(script_path, DocumentaryScript)
+        timing = load_model(project / "05_timing/audio_timing.json", AudioTiming)
+        context = _context(store, project_id) | {
+            "research": research,
+            "structure": structure,
+            "script": script,
+            "timing": timing,
+            "exact_shots": exact,
+        }
+        agent = get_agent(agent_kind, context, consume_response)
+        proposal = agent.run(
+            stage="shots",
+            prompt=render_prompt(
+                "shots", brief=brief, research=research, script=script,
+                timing=timing, exact_shots=exact,
+            ),
+            output_model=ShotPlan,
+            request_dir=project / "_requests",
+        )
+        shots = _apply_visual_direction(exact, proposal)
+        write_json(project / "06_shots/visual_director_response.json", proposal)
+    version = store.next_version(project_id, "shots")
     write_json(versioned_path(project / "06_shots", "shot_plan", ".json", version), shots)
+    write_json(project / "06_shots/shot_plan.json", shots)
+    write_json(project / "04_shot_plan/shot_plan.json", shots)
     (project / "06_shots/shot_plan.md").write_text(shots_markdown(shots), encoding="utf-8")
     store.transition(project_id, ProjectState.SHOTS_REVIEW)
     return shots
