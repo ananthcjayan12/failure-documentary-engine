@@ -11,19 +11,30 @@ from .models import (
 )
 
 
-def optimize_shots(shot_plan: ShotPlan, maximum_assets: int) -> MasterAssetPlan:
-    """Compatibility wrapper for callers of the old semantic-clustering API.
+def _legacy_strategy(maximum_assets: int) -> MasterFootageStrategy:
+    count = max(1, maximum_assets)
+    hero = max(1, count // 3) if count >= 3 else 1
+    remaining = count - hero
+    atmosphere = max(0, remaining // 2)
+    investigation = max(0, remaining - atmosphere)
+    if count == 1:
+        atmosphere = investigation = 0
+    return MasterFootageStrategy(
+        hero_count=hero,
+        atmosphere_count=atmosphere,
+        investigation_count=investigation,
+        target_generated_video_count=count,
+        enforce_exact_counts=True,
+    )
 
-    The production pipeline no longer groups independent shot prompts by text similarity.
-    It constructs an explicit reusable footage vocabulary first. New code should call
-    `plan_master_footage()`; this wrapper converts an old audio-led ShotPlan into the
-    deterministic two-pass contract without overwriting any project artifact.
+
+def optimize_shots(shot_plan: ShotPlan, maximum_assets: int) -> MasterAssetPlan:
+    """Compatibility wrapper for callers of the removed semantic-clustering API.
+
+    Production uses `plan_master_footage()` with the explicit 8 / 8 / 8 strategy.
+    Older tests and projects may still request a smaller safety limit; they receive a
+    deterministic legacy proposal rather than semantic text-similarity clustering.
     """
-    if maximum_assets < 24:
-        raise ValueError(
-            "The default two-pass strategy requires maximum_assets >= 24 "
-            "for 8 hero, 8 atmosphere, and 8 investigation packages."
-        )
     skeleton = ShotSkeletonPlan(
         project_id=shot_plan.project_id,
         total_seconds=shot_plan.total_seconds,
@@ -46,11 +57,14 @@ def optimize_shots(shot_plan: ShotPlan, maximum_assets: int) -> MasterAssetPlan:
             for item in shot_plan.shots
         ],
     )
+    strategy = MasterFootageStrategy() if maximum_assets >= 24 else _legacy_strategy(maximum_assets)
     brief = ProjectBrief(
         project_id=shot_plan.project_id,
         title=shot_plan.project_id,
         topic=shot_plan.project_id,
         maximum_master_assets=maximum_assets,
-        master_footage_strategy=MasterFootageStrategy(),
+        master_footage_strategy=strategy,
     )
-    return deterministic_master_plan(brief, skeleton)
+    plan = deterministic_master_plan(brief, skeleton)
+    plan.status = "legacy"
+    return plan
