@@ -210,8 +210,8 @@ def validate_master_plan(
     actual_ids = [item.asset_id for item in plan.assets]
     if actual_ids != expected_ids:
         errors.append(
-            "Master asset IDs must be deterministic and ordered as "
-            "H01–H08, L01–L08, and E01–E08 for the default strategy."
+            "Master asset IDs must be deterministic and ordered according to the configured "
+            "hero, atmosphere, and investigation counts."
         )
     if len(actual_ids) != len(set(actual_ids)):
         errors.append("Master asset IDs must be unique.")
@@ -370,10 +370,13 @@ def deterministic_master_plan(
             assets.append(asset)
             category_assets[category].append(asset)
 
+    non_empty_pools = [pool for pool in category_assets.values() if pool]
+    if not non_empty_pools:
+        raise ValueError("master-footage strategy produced no generated packages")
     counters = defaultdict(int)
     for shot in skeleton.shots:
         category = _assigned_category(shot)
-        pool = category_assets[category]
+        pool = category_assets.get(category) or non_empty_pools[0]
         asset = pool[counters[category] % len(pool)]
         counters[category] += 1
         if shot.shot_id not in asset.linked_shots:
