@@ -1,52 +1,146 @@
 from __future__ import annotations
 
-import json
 import re
-import shutil
 from pathlib import Path
 
 from PIL import Image
 
 from .constants import DEFAULT_GLOBAL_STYLE
 from .io import load_model, safe_copy, write_json
-from .models import MasterAssetPlan, ReviewStatus, ShotPlan
+from .master_footage import approved_master_plan
+from .models import MasterAsset, MasterAssetPlan, ReviewStatus, ShotPlan
 
 
-def generate_image_prompts(plan: MasterAssetPlan, shot_plan: ShotPlan) -> MasterAssetPlan:
-    shots = {shot.shot_id: shot for shot in shot_plan.shots}
-    for asset in plan.assets:
-        linked = [shots[sid] for sid in asset.linked_shots]
-        cameras = sorted({s.camera for s in linked if s.camera})
-        motions = sorted({s.motion for s in linked if s.motion})
-        overlays = sorted({item for s in linked for item in s.overlay_requirements})
-        asset.image_prompt = (
-            f"{DEFAULT_GLOBAL_STYLE}\n\n"
-            f"MASTER ASSET {asset.asset_id}: {asset.title}.\n"
-            f"Primary narrative use: {asset.primary_use}.\n"
-            f"Composition: {', '.join(cameras[:3]) or 'stable cinematic wide composition'}.\n"
-            f"Future movement: {', '.join(motions[:3]) or 'subtle controlled environmental movement'}.\n"
-            f"Leave clean negative space for overlays: {', '.join(overlays[:6]) or 'documentary labels and evidence graphics'}.\n"
-            "The image must provide multiple useful crop regions: one strong wide frame, one subject detail, "
-            "and one clean atmospheric area. Preserve realistic geometry and continuity."
-        )
-        asset.video_prompt = (
-            "Preserve the approved image composition, subject identity, geometry, lighting, and colour palette. "
-            f"Animate only: {', '.join(motions[:3]) or 'subtle natural environmental movement'}. "
-            "Single continuous five-second shot, no internal cuts, no camera orbit, no sudden acceleration, "
-            "no deformation, no added objects, no text, and stable opening and ending frames."
-        )
-    return plan
+def _shared_constraints(asset: MasterAsset) -> str:
+    return (
+        f"Factual scope: {', '.join(asset.factual_scope) or 'visual context only; no new factual claim'}.\n"
+        f"Continuity requirements: {', '.join(asset.continuity_requirements) or 'preserve approved project continuity'}.\n"
+        f"Subject identity requirements: {', '.join(asset.subject_identity_requirements) or 'preserve approved subject identity'}.\n"
+        f"Subject geometry requirements: {', '.join(asset.subject_geometry_requirements) or 'physically credible geometry and scale'}.\n"
+        f"Prohibited details: {', '.join(asset.prohibited_details) or 'embedded text, watermark, unsupported action'}.\n"
+        f"Overlay-safe zones: {', '.join(asset.overlay_safe_zones) or 'upper right'}.\n"
+        f"Useful crop regions: "
+        + "; ".join(f"{item.crop_id}: {item.description}" for item in asset.crop_regions)
+        + "."
+    )
+
+
+def _hero_prompts(asset: MasterAsset) -> tuple[str, str]:
+    image = (
+        f"{DEFAULT_GLOBAL_STYLE}\n\n"
+        f"HERO FOOTAGE PACKAGE {asset.asset_id}: {asset.title}.\n"
+        f"Primary story moment: {asset.primary_use}.\n"
+        "Show one clearly defined physical event with accurate subject identity, scale, environment, "
+        "and cinematic camera position. Build a strong wide composition plus stable secondary detail "
+        "regions for callbacks. Do not add unsupported dramatic action, damage, weather, people, or evidence.\n"
+        f"{_shared_constraints(asset)}"
+    )
+    video = (
+        f"Create a single continuous {asset.source_duration_seconds:g}-second hero clip from the approved image. "
+        "Preserve identity, geometry, scale, lighting, weather, and every factual boundary. Use realistic physical "
+        "movement and restrained cinematic camera motion. Keep opening and ending frames stable enough for callbacks "
+        "and match cuts. No internal cuts, morphing, new objects, embedded text, or exaggerated disaster action."
+    )
+    return image, video
+
+
+def _atmosphere_prompts(asset: MasterAsset) -> tuple[str, str]:
+    image = (
+        f"{DEFAULT_GLOBAL_STYLE}\n\n"
+        f"LOOPABLE ATMOSPHERE PACKAGE {asset.asset_id}: {asset.title}.\n"
+        f"Primary editorial use: {asset.primary_use}.\n"
+        "Design a stationary or nearly stationary 16:9 environment with periodic natural movement, large overlay-safe "
+        "negative space, and no dominant one-time event. The composition must support practical looping, slowing, "
+        "freezing, crops, and technical overlays without appearing repetitive.\n"
+        f"{_shared_constraints(asset)}"
+    )
+    video = (
+        f"Create a seamless {asset.source_duration_seconds:g}-second atmosphere loop from the approved image. "
+        "Use only periodic natural movement. The first and final frames must match closely in composition, lighting, "
+        "object position, and motion phase. Camera must remain stationary or nearly stationary. No unique event, "
+        "new object, text, sudden movement, deformation, or non-loopable reveal."
+    )
+    return image, video
+
+
+def _investigation_prompts(asset: MasterAsset) -> tuple[str, str]:
+    disclosure = (
+        asset.reconstruction_disclosure.text
+        if asset.reconstruction_disclosure and asset.reconstruction_disclosure.required
+        else "no disclosure required"
+    )
+    image = (
+        f"{DEFAULT_GLOBAL_STYLE}\n\n"
+        f"INVESTIGATION / RECONSTRUCTION PACKAGE {asset.asset_id}: {asset.title}.\n"
+        f"Primary evidence use: {asset.primary_use}.\n"
+        f"Factual context ID: {asset.factual_context_id}. Reconstruction disclosure: {disclosure}.\n"
+        "Create a controlled technical or investigative environment with multiple useful detail regions, obscured or "
+        "non-identifiable people where necessary, replaceable monitor surfaces, accurate instruments and restrained "
+        "lighting. Do not bake maps, labels, transcripts, timestamps, radar tracks, or conclusions into the image; "
+        "those are deterministic overlay tracks.\n"
+        f"{_shared_constraints(asset)}"
+    )
+    video = (
+        f"Create a single continuous {asset.source_duration_seconds:g}-second investigation clip from the approved image. "
+        "Preserve all equipment, geometry, identities, monitor surfaces, lighting, and factual boundaries. Use subtle "
+        "camera or human movement only. Keep monitor content neutral and replaceable. Do not add readable evidence, "
+        "labels, maps, radar tracks, conclusions, or unsupported people. Maintain stable detail regions for overlays."
+    )
+    return image, video
+
+
+def prompts_for_asset(asset: MasterAsset) -> tuple[str, str]:
+    if asset.category == "hero":
+        return _hero_prompts(asset)
+    if asset.category == "atmosphere":
+        return _atmosphere_prompts(asset)
+    if asset.category == "investigation":
+        return _investigation_prompts(asset)
+    # Legacy compatibility only.
+    return _hero_prompts(asset)
+
+
+def generate_image_prompts(
+    plan: MasterAssetPlan,
+    shot_plan: ShotPlan | None = None,
+) -> MasterAssetPlan:
+    """Create a derived generation plan after the package specification is approved.
+
+    `shot_plan` remains an optional compatibility argument. Prompts are generated from
+    the approved master-package contract, not independent per-shot directions.
+    """
+    del shot_plan
+    if plan.status not in {"approved", "legacy"}:
+        raise RuntimeError("master-footage prompts can only be derived after plan approval")
+    derived = plan.model_copy(deep=True)
+    for asset in derived.assets:
+        asset.image_prompt, asset.video_prompt = prompts_for_asset(asset)
+    return derived
+
+
+def build_generation_plan(project_dir: Path) -> MasterAssetPlan:
+    project_dir = Path(project_dir)
+    approved = approved_master_plan(project_dir)
+    derived = generate_image_prompts(approved)
+    write_json(project_dir / "05_master_assets/generation_plan.json", derived)
+    for asset in derived.assets:
+        prompt_dir = project_dir / "05_master_assets/prompts" / asset.asset_id
+        prompt_dir.mkdir(parents=True, exist_ok=True)
+        (prompt_dir / "image_prompt.txt").write_text(asset.image_prompt.rstrip() + "\n", encoding="utf-8")
+        (prompt_dir / "video_prompt.txt").write_text(asset.video_prompt.rstrip() + "\n", encoding="utf-8")
+    return derived
 
 
 def _asset_id_from_name(name: str) -> str | None:
-    match = re.match(r"(A\d{2,3})", name.upper())
+    match = re.match(r"([HLE]\d{2,3}|A\d{2,3})", name.upper())
     return match.group(1) if match else None
 
 
 def import_images(project_dir: Path, min_width: int = 1280, ratio_tolerance: float = 0.08) -> dict:
-    plan_path = project_dir / "05_master_assets/master_assets.json"
+    generation_path = project_dir / "05_master_assets/generation_plan.json"
+    plan_path = generation_path if generation_path.exists() else project_dir / "05_master_assets/master_assets.json"
     plan = load_model(plan_path, MasterAssetPlan)
-    assets = {a.asset_id: a for a in plan.assets}
+    assets = {item.asset_id: item for item in plan.assets}
     inbox = project_dir / "08_generated_images/inbox"
     approved_dir = project_dir / "08_generated_images/approved"
     thumbnails = project_dir / "08_generated_images/thumbnails"
