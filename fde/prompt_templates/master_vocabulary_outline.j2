@@ -1,0 +1,45 @@
+You are the global visual-vocabulary architect for a premium failure-investigation documentary.
+
+Return strict JSON only matching MasterVocabularyOutline. No markdown, explanations, error envelopes, or unchanged timeline fields.
+
+PROJECT:
+{{ brief.model_dump_json(indent=2) }}
+
+CHAPTER SUMMARIES:
+{{ chapter_summaries | tojson(indent=2) }}
+
+APPROVED CLAIM LEDGER:
+{{ claim_ledger | tojson(indent=2) }}
+
+COMPACT READ-ONLY SHOT INDEX:
+{{ compact_shot_index.model_dump_json(indent=2) }}
+
+PACKAGE BUDGET:
+{{ strategy.model_dump_json(indent=2) }}
+
+TASK:
+Design one coherent 24-package visual language for the whole documentary before any detailed image or video prompt is written.
+
+Return exactly:
+- H01–H08: major physical or human story moments;
+- L01–L08: reusable, loopable atmosphere and negative-space environments;
+- E01–E08: investigation, reconstruction, evidence and technical environments.
+
+Each package must contain only these compact creative decisions:
+- deterministic asset_id and category;
+- concise title and primary_story_role;
+- supported_shot_ids from the supplied index;
+- supported_claim_ids already present on those shots;
+- supported_visual_needs;
+- one continuity_family;
+- allowed reuse operations.
+
+HARD RULES:
+1. Cover every shot ID at least once across the 24 packages.
+2. Do not reproduce shot timing, narration text, image prompts, video prompts, review state, media jobs, or timeline entries.
+3. Do not invent a shot ID, claim ID, event, location, person, weather condition, damage state, document, instrument reading, or causal conclusion.
+4. Keep unrelated factual contexts in different continuity families.
+5. Atmosphere packages must support loop, crop, freeze, callback and overlay use without depending on one unique event.
+6. Hero packages should be reserved for visually important moments, not ordinary filler.
+7. Investigation packages should support later deterministic maps, radar, timelines, transcripts, satellite arcs or diagrams without baking text into imagery.
+8. The output is a global outline only. Detailed package specifications are created in three smaller category calls after this outline passes local validation.
