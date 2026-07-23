@@ -8,13 +8,13 @@ from . import shots as _shots
 from .compact_planning import (
     direct_editorial_shots_compact,
     install_agent_safety_patch,
-    plan_master_footage_compact,
     plan_semantic_shot_skeleton,
 )
+from .compact_planning_runtime import plan_master_footage_compact_runtime
 
 
 _shots.plan_shot_skeleton = plan_semantic_shot_skeleton
 _shots.plan_shots = plan_semantic_shot_skeleton
-_master_footage.plan_master_footage = plan_master_footage_compact
+_master_footage.plan_master_footage = plan_master_footage_compact_runtime
 _editorial.direct_editorial_shots = direct_editorial_shots_compact
 install_agent_safety_patch()
