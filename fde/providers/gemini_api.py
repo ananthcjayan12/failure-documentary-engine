@@ -49,7 +49,9 @@ def run_structured(
     except ImportError as exc:
         raise RuntimeError("Install google-genai to use Gemini API") from exc
     client = _client()
-    thinking_level = {"low": "LOW", "medium": "MEDIUM", "high": "HIGH", "max": "HIGH"}.get(reasoning_effort, "HIGH")
+    thinking_level = {
+        "low": "LOW", "medium": "MEDIUM", "high": "HIGH", "max": "HIGH",
+    }.get(reasoning_effort, "HIGH")
     config_kwargs: dict[str, Any] = {
         "response_mime_type": "application/json",
         "response_schema": schema,
@@ -62,7 +64,8 @@ def run_structured(
     response = client.models.generate_content(
         model=model,
         contents=(
-            "Return exactly one JSON object matching the supplied schema. Do not include markdown or commentary.\n\n"
+            "Return exactly one JSON object matching the supplied schema. "
+            "Do not include markdown or commentary.\n\n"
             f"TASK\n{prompt}"
         ),
         config=types.GenerateContentConfig(**config_kwargs),
@@ -88,6 +91,93 @@ def _part_bytes(part: Any) -> bytes | None:
     return bytes(data)
 
 
+def _normalize_image_size(value: str) -> str:
+    normalized = (value or "1K").strip()
+    aliases = {
+        "0.5k": "512",
+        "0.5K": "512",
+        "512px": "512",
+        "512PX": "512",
+        "1k": "1K",
+        "2k": "2K",
+        "4k": "4K",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _interaction_image_bytes(interaction: Any) -> bytes | None:
+    direct = getattr(interaction, "output_image", None)
+    data = getattr(direct, "data", None) if direct is not None else None
+    if data:
+        return data if isinstance(data, bytes) else base64.b64decode(data)
+    output = getattr(interaction, "output", None) or []
+    for item in output:
+        image = getattr(item, "image", None) or getattr(item, "output_image", None)
+        data = getattr(image, "data", None) if image is not None else getattr(item, "data", None)
+        if data:
+            return data if isinstance(data, bytes) else base64.b64decode(data)
+    return None
+
+
+def _generate_image_interactions(
+    *,
+    client: Any,
+    prompt: str,
+    model: str,
+    image_size: str,
+    aspect_ratio: str,
+) -> bytes | None:
+    interactions = getattr(client, "interactions", None)
+    create = getattr(interactions, "create", None) if interactions is not None else None
+    if not callable(create):
+        return None
+    response_format: dict[str, Any] = {
+        "type": "image",
+        "mime_type": "image/png",
+        "aspect_ratio": aspect_ratio,
+    }
+    if image_size:
+        response_format["image_size"] = image_size
+    interaction = create(
+        model=model,
+        input=prompt,
+        response_format=response_format,
+    )
+    return _interaction_image_bytes(interaction)
+
+
+def _generate_image_legacy(
+    *,
+    client: Any,
+    prompt: str,
+    model: str,
+    image_size: str,
+    aspect_ratio: str,
+) -> bytes | None:
+    try:
+        from google.genai import types
+    except ImportError as exc:
+        raise RuntimeError("Install google-genai to use Gemini image generation") from exc
+    config_kwargs: dict[str, Any] = {"aspect_ratio": aspect_ratio}
+    if image_size:
+        config_kwargs["image_size"] = image_size
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_modalities=["TEXT", "IMAGE"],
+            image_config=types.ImageConfig(**config_kwargs),
+        ),
+    )
+    for candidate in getattr(response, "candidates", []) or []:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", []) or []:
+            payload = _part_bytes(part)
+            if payload:
+                return payload
+    return None
+
+
 def generate_image(
     *,
     prompt: str,
@@ -98,38 +188,43 @@ def generate_image(
     quality: str = "standard",
     timeout: int = 1800,
 ) -> dict[str, Any]:
-    del timeout, quality
-    try:
-        from google.genai import types
-    except ImportError as exc:
-        raise RuntimeError("Install google-genai to use Gemini image generation") from exc
+    del timeout
     client = _client()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    image_config_kwargs: dict[str, Any] = {"aspect_ratio": aspect_ratio}
-    if resolution:
-        image_config_kwargs["image_size"] = resolution
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_modalities=["TEXT", "IMAGE"],
-            image_config=types.ImageConfig(**image_config_kwargs),
-        ),
-    )
-    for candidate in getattr(response, "candidates", []) or []:
-        content = getattr(candidate, "content", None)
-        for part in getattr(content, "parts", []) or []:
-            payload = _part_bytes(part)
-            if payload:
-                destination.write_bytes(payload)
-                return {
-                    "provider": "gemini_api",
-                    "model": model,
-                    "resolution": resolution,
-                    "aspect_ratio": aspect_ratio,
-                    "path": str(destination),
-                }
-    raise RuntimeError("Gemini image generation returned no image data")
+    image_size = _normalize_image_size(resolution)
+    payload: bytes | None = None
+    api_mode = "interactions"
+    try:
+        payload = _generate_image_interactions(
+            client=client,
+            prompt=prompt,
+            model=model,
+            image_size=image_size,
+            aspect_ratio=aspect_ratio,
+        )
+    except (AttributeError, TypeError, ValueError):
+        payload = None
+    if payload is None:
+        api_mode = "generate_content"
+        payload = _generate_image_legacy(
+            client=client,
+            prompt=prompt,
+            model=model,
+            image_size=image_size,
+            aspect_ratio=aspect_ratio,
+        )
+    if payload is None:
+        raise RuntimeError("Gemini image generation returned no image data")
+    destination.write_bytes(payload)
+    return {
+        "provider": "gemini_api",
+        "model": model,
+        "quality": quality,
+        "resolution": image_size,
+        "aspect_ratio": aspect_ratio,
+        "api_mode": api_mode,
+        "path": str(destination),
+    }
 
 
 def _load_reference(types: Any, reference: Path | None):
@@ -138,6 +233,20 @@ def _load_reference(types: Any, reference: Path | None):
     if hasattr(types, "Image") and hasattr(types.Image, "from_file"):
         return types.Image.from_file(location=str(reference))
     return None
+
+
+def _normalize_video_resolution(value: str) -> str:
+    normalized = (value or "720p").strip()
+    return "4k" if normalized.lower() == "4k" else normalized.lower()
+
+
+def _provider_video_duration(model: str, resolution: str, requested: float) -> int:
+    requested_int = int(round(requested))
+    if model.startswith("veo-"):
+        if resolution in {"1080p", "4k"}:
+            return 8
+        return min((4, 6, 8), key=lambda item: abs(item - requested_int))
+    return max(3, min(10, requested_int))
 
 
 def generate_video(
@@ -157,14 +266,11 @@ def generate_video(
         raise RuntimeError("Install google-genai to use Gemini video generation") from exc
     client = _client()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    duration_int = int(round(duration))
-    if model.startswith("veo-"):
-        duration_int = min((4, 6, 8), key=lambda item: abs(item - duration_int))
-    else:
-        duration_int = max(3, min(10, duration_int))
+    normalized_resolution = _normalize_video_resolution(resolution)
+    duration_int = _provider_video_duration(model, normalized_resolution, duration)
     config_kwargs: dict[str, Any] = {
         "aspect_ratio": aspect_ratio,
-        "resolution": resolution,
+        "resolution": normalized_resolution,
         "duration_seconds": duration_int,
     }
     image = _load_reference(types, reference)
@@ -209,7 +315,7 @@ def generate_video(
     return {
         "provider": "gemini_api",
         "model": model,
-        "resolution": resolution,
+        "resolution": normalized_resolution,
         "aspect_ratio": aspect_ratio,
         "provider_duration_seconds": duration_int,
         "requested_duration_seconds": duration,
