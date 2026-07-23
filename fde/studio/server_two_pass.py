@@ -4,25 +4,25 @@ import re
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import Body, HTTPException
 
 from ..editorial import approve_editorial_shots
 from ..master_footage import approve_master_footage
 from ..models import ProjectState
 from . import server as _base
 
-# Existing upload helpers use this compiled expression. Accept new package IDs while
+_ORIGINAL_CREATE_APP = _base.create_app
+
+# Existing upload helpers use this expression. Accept new package IDs while
 # preserving old SHOT_### and A## migration imports.
 _base.SHOT_ID_RE = re.compile(r"(?:SHOT_\d{3}|[HLEA]\d{2,3})", re.I)
 
 
 def create_app(workspace: Path | str = "projects"):
-    app = _base.create_app(workspace)
+    app = _ORIGINAL_CREATE_APP(workspace)
     service = app.state.service
     jobs = app.state.jobs
 
-    # Replace the old approval endpoint that generated semantic clusters when shots
-    # were approved. FastAPI resolves routes in order, so remove the existing route.
     app.router.routes = [
         route
         for route in app.router.routes
@@ -67,3 +67,7 @@ def create_app(workspace: Path | str = "projects"):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return app
+
+
+# Code that imports fde.studio.server directly receives the corrected app factory.
+_base.create_app = create_app
