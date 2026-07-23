@@ -62,13 +62,10 @@ def _extract_candidates(output: str, extensions: set[str]) -> list[str]:
                 if any(ext in value.lower() for ext in extensions):
                     candidates.append(value)
         except json.JSONDecodeError:
-            candidates.extend(
-                re.findall(
-                    r"(?:https?://\S+|(?:/|~)[^\s\"']+\.(?:png|jpe?g|webp|mp4|mov|webm|m4v))",
-                    line,
-                    flags=re.I,
-                )
-            )
+            candidates.extend(re.findall(
+                r"(?:https?://\S+|(?:/|~)[^\s\"']+\.(?:png|jpe?g|webp|mp4|mov|webm|m4v))",
+                line, flags=re.I,
+            ))
     return candidates
 
 
@@ -105,25 +102,12 @@ def _materialize_candidate(candidate: str, destination: Path) -> bool:
 
 def _base_command(*, prompt: str, cwd: Path, model: str, max_turns: int = 24) -> list[str]:
     command = [
-        grok_binary(),
-        "--no-auto-update",
-        "-p",
-        prompt,
-        "--output-format",
-        "streaming-json",
-        "--cwd",
-        str(cwd),
-        "--always-approve",
-        "--sandbox",
-        "workspace",
-        "--max-turns",
-        str(max_turns),
-        "--no-plan",
-        "--no-subagents",
-        "--no-memory",
-        "--disable-web-search",
+        grok_binary(), "--no-auto-update", "-p", prompt, "--output-format", "streaming-json",
+        "--cwd", str(cwd), "--always-approve", "--sandbox", "workspace", "--max-turns", str(max_turns),
+        "--no-plan", "--no-subagents", "--no-memory", "--disable-web-search",
     ]
-    if model and model not in {"authenticated-default", "default"}:
+    # Structured Grok models are CLI model selectors. Imagine model names are passed to the tool in the prompt.
+    if model and model not in {"authenticated-default", "default"} and not model.startswith("grok-imagine-"):
         command[1:1] = ["--model", model]
     return command
 
@@ -141,9 +125,7 @@ def run_structured(
     )
     result = subprocess.run(
         _base_command(prompt=full_prompt, cwd=cwd, model=model, max_turns=16),
-        capture_output=True,
-        text=True,
-        timeout=max(1, timeout),
+        capture_output=True, text=True, timeout=max(1, timeout),
     )
     combined = (result.stdout or "") + "\n" + (result.stderr or "")
     (destination.parent / "grok-cli-output.jsonl").write_text(combined, encoding="utf-8")
@@ -157,8 +139,7 @@ def run_structured(
 
 def _extract_json_object(text: str) -> dict[str, Any]:
     candidates = [text]
-    fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.S | re.I)
-    candidates.extend(fenced)
+    candidates.extend(re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.S | re.I))
     first, last = text.find("{"), text.rfind("}")
     if first >= 0 and last > first:
         candidates.append(text[first:last + 1])
@@ -177,6 +158,7 @@ def generate_media(
     *, prompt: str, destination: Path, media_type: str, cwd: Path,
     reference: Path | None = None, model: str = "authenticated-default",
     timeout: int = 3600, duration: float = 5, aspect_ratio: str = "16:9",
+    resolution: str = "", quality: str = "",
 ) -> dict[str, Any]:
     if media_type not in {"image", "video"}:
         raise ValueError(f"Unsupported Grok media type: {media_type}")
@@ -191,11 +173,13 @@ def generate_media(
     )
     tool_rule = (
         "Use the built-in Imagine image-generation tool exactly once."
-        if media_type == "image"
-        else "Use the built-in Imagine image-to-video tool exactly once."
+        if media_type == "image" else "Use the built-in Imagine image-to-video tool exactly once."
     )
+    model_rule = f"Requested Imagine model: {model}." if model.startswith("grok-imagine-") else ""
+    quality_rule = f"Required quality preset: {quality}." if quality else ""
+    resolution_rule = f"Required output resolution: {resolution}." if resolution else ""
     full_prompt = (
-        f"{tool_rule}\n"
+        f"{tool_rule}\n{model_rule}\n{quality_rule}\n{resolution_rule}\n"
         "Do not edit code and do not create substitute placeholder media. "
         "Wait for the media task to finish, then return the exact local output path or output URL. "
         "If the media tool fails, report that error immediately; do not inspect configuration, credentials, "
@@ -203,7 +187,8 @@ def generate_media(
         f"Required aspect ratio: {aspect_ratio}. Required duration for video: {duration:.1f} seconds."
         f"{reference_rule}\n\nCREATIVE BRIEF\n{prompt}"
     )
-    command = _base_command(prompt=full_prompt, cwd=cwd, model=model, max_turns=24)
+    # Use the account's authenticated reasoning model to invoke Imagine; the requested media model is in the tool brief.
+    command = _base_command(prompt=full_prompt, cwd=cwd, model="authenticated-default", max_turns=24)
     result = subprocess.run(command, capture_output=True, text=True, timeout=max(1, timeout))
     combined = (result.stdout or "") + "\n" + (result.stderr or "")
     (destination.parent / "grok-cli-output.jsonl").write_text(combined, encoding="utf-8")
@@ -211,13 +196,21 @@ def generate_media(
         raise RuntimeError(f"Grok media generation failed: {combined[-4000:]}")
     for candidate in _extract_candidates(combined, extensions):
         if _materialize_candidate(candidate, destination):
-            return {"provider": "grok_cli", "model": model, "source": candidate, "path": str(destination)}
+            return {
+                "provider": "grok_cli", "model": model, "quality": quality,
+                "resolution": resolution, "aspect_ratio": aspect_ratio,
+                "source": candidate, "path": str(destination),
+            }
     after = _media_files(scan_roots, extensions, since=start)
     new_paths = [path for key, path in after.items() if key not in before]
     if new_paths:
         newest = max(new_paths, key=lambda path: path.stat().st_mtime)
         shutil.copy2(newest, destination)
-        return {"provider": "grok_cli", "model": model, "source": str(newest), "path": str(destination)}
+        return {
+            "provider": "grok_cli", "model": model, "quality": quality,
+            "resolution": resolution, "aspect_ratio": aspect_ratio,
+            "source": str(newest), "path": str(destination),
+        }
     transcript = streaming_text(combined)
     if "ZDR" in transcript and "upload_url" in transcript:
         raise RuntimeError(
