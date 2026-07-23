@@ -11,6 +11,7 @@ from typing import Any
 
 from ..io import read_json, write_json
 from ..orchestrator import resolve_task
+from .restart import RESTART_SPECS, restart_stage
 
 
 def utc_now() -> str:
@@ -68,6 +69,15 @@ def _voice_provider(route: dict[str, Any] | None, config: dict[str, Any]) -> str
     return "gemini"
 
 
+def _restart_request(action: str) -> tuple[str, bool] | None:
+    for prefix, run_again in (("restart_", False), ("rerun_", True)):
+        if action.startswith(prefix):
+            stage_id = action[len(prefix):]
+            if stage_id in RESTART_SPECS:
+                return stage_id, run_again
+    return None
+
+
 class JobManager:
     def __init__(self, workspace: Path, config_getter, orchestrator_getter=None, store=None) -> None:
         self.workspace = Path(workspace).resolve()
@@ -97,15 +107,11 @@ class JobManager:
             payload["status"] = "running"
             payload["pid"] = process.pid
         return {
-            "status": payload.get("status", "idle"),
-            "action": payload.get("action"),
-            "label": payload.get("label"),
-            "started_at": payload.get("started_at"),
-            "ended_at": payload.get("ended_at"),
-            "return_code": payload.get("return_code"),
-            "error": payload.get("error"),
-            "pid": payload.get("pid"),
-            "routing": payload.get("routing"),
+            "status": payload.get("status", "idle"), "action": payload.get("action"),
+            "label": payload.get("label"), "started_at": payload.get("started_at"),
+            "ended_at": payload.get("ended_at"), "return_code": payload.get("return_code"),
+            "error": payload.get("error"), "pid": payload.get("pid"), "routing": payload.get("routing"),
+            "restart": payload.get("restart"),
         }
 
     def log_tail(self, project_id: str, lines: int = 160) -> str:
@@ -116,12 +122,29 @@ class JobManager:
         return "\n".join(data[-max(1, min(lines, 1000)):])
 
     def start(self, project_id: str, action: str, *, agent: str | None = None) -> dict[str, Any]:
-        if action not in ACTION_COMMANDS:
+        restart_request = _restart_request(action)
+        if not restart_request and action not in ACTION_COMMANDS:
             raise ValueError(f"Unknown action: {action}")
         with self._lock:
             running = self._processes.get(project_id)
             if running and running.poll() is None:
                 raise RuntimeError("A job is already running for this project")
+            restart_report = None
+            if restart_request:
+                if self.store is None:
+                    raise RuntimeError("Stage restart requires a project store")
+                stage_id, run_again = restart_request
+                restart_report = restart_stage(self.store, project_id, stage_id)
+                if not run_again:
+                    state = {
+                        "status": "completed", "action": action,
+                        "label": f"Restart {stage_id.replace('_', ' ').title()}",
+                        "started_at": utc_now(), "ended_at": utc_now(), "return_code": 0,
+                        "error": None, "pid": None, "routing": None, "restart": restart_report,
+                    }
+                    write_json(self.state_path(project_id), state)
+                    return state
+                action = restart_report["run_action"]
             config = self.config_getter()
             task_id = ACTION_TASKS.get(action)
             route = None
@@ -130,11 +153,7 @@ class JobManager:
                 if self.store is not None:
                     try:
                         brief = self.store.brief(project_id)
-                        context = {
-                            "duration_seconds": brief.target_duration_seconds,
-                            "topic": brief.topic,
-                            "title": brief.title,
-                        }
+                        context = {"duration_seconds": brief.target_duration_seconds, "topic": brief.topic, "title": brief.title}
                     except Exception:
                         context = {}
                 route = resolve_task(self.orchestrator_getter(), task_id, context)
@@ -189,37 +208,35 @@ class JobManager:
                 env["FDE_MEDIA_DURATION"] = str(route.get("duration_seconds", 0) or "")
                 env["FDE_VOICE_MODEL"] = str(route.get("model", ""))
                 env["FDE_VOICE_NAME"] = str(route.get("voice", ""))
-                env["FDE_WHISPER_MODEL"] = str(route.get("model", "base.en")) if task_id == "word_alignment" else env.get("FDE_WHISPER_MODEL", "base.en")
+                if task_id == "word_alignment":
+                    env["FDE_WHISPER_MODEL"] = str(route.get("model", "base.en"))
             elif config.get("command_template"):
                 env["FDE_LLM_COMMAND"] = str(config["command_template"])
             log_path = self.log_path(project_id)
             log_path.parent.mkdir(parents=True, exist_ok=True)
             log_handle = log_path.open("a", encoding="utf-8")
+            if restart_report:
+                log_handle.write(f"\n[{utc_now()}] RESTART {restart_report['stage_id']} archived to {restart_report['history_path']}\n")
             log_handle.write(f"\n[{utc_now()}] START {action}\n$ {' '.join(command)}\n\n")
             log_handle.flush()
             process = subprocess.Popen(
-                command,
-                cwd=Path(__file__).resolve().parents[2],
-                stdout=log_handle,
-                stderr=subprocess.STDOUT,
-                text=True,
-                env=env,
-                start_new_session=True,
+                command, cwd=Path(__file__).resolve().parents[2], stdout=log_handle,
+                stderr=subprocess.STDOUT, text=True, env=env, start_new_session=True,
             )
             self._processes[project_id] = process
             state = {
-                "status": "running", "action": action,
-                "label": action.replace("_", " ").title(), "started_at": utc_now(),
-                "ended_at": None, "return_code": None, "error": None, "pid": process.pid,
+                "status": "running", "action": action, "label": action.replace("_", " ").title(),
+                "started_at": utc_now(), "ended_at": None, "return_code": None, "error": None,
+                "pid": process.pid, "restart": restart_report,
                 "routing": ({
                     "task_id": task_id, "provider": route.get("provider"),
                     "provider_label": route.get("provider_label"), "model": route.get("model"),
-                    "reasoning_effort": route.get("reasoning_effort"),
-                    "quality": route.get("quality"), "resolution": route.get("resolution"),
-                    "aspect_ratio": route.get("aspect_ratio"), "duration_seconds": route.get("duration_seconds"),
-                    "voice": route.get("voice"), "fallback_provider": route.get("fallback_provider"),
-                    "fallback_model": route.get("fallback_model"), "capability": route.get("capability"),
-                    "adapter": route.get("provider_adapter"), "matched_rule": route.get("matched_rule"),
+                    "reasoning_effort": route.get("reasoning_effort"), "quality": route.get("quality"),
+                    "resolution": route.get("resolution"), "aspect_ratio": route.get("aspect_ratio"),
+                    "duration_seconds": route.get("duration_seconds"), "voice": route.get("voice"),
+                    "fallback_provider": route.get("fallback_provider"), "fallback_model": route.get("fallback_model"),
+                    "capability": route.get("capability"), "adapter": route.get("provider_adapter"),
+                    "matched_rule": route.get("matched_rule"),
                 } if route else None),
             }
             write_json(self.state_path(project_id), state)
