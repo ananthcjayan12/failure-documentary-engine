@@ -31,7 +31,10 @@ def test_studio_bootstrap_and_modern_routes(tmp_path: Path):
     assert project["next_action"]["id"] == "approve_images"
 
     assert client.get("/").status_code == 200
-    assert client.get("/static/app.js").status_code == 200
+    app_js = client.get("/static/app.js")
+    assert app_js.status_code == 200
+    assert "Restart from here" in app_js.text
+    assert "Run this step again" in app_js.text
 
 
 def test_studio_project_creation_and_settings(tmp_path: Path):
@@ -79,21 +82,45 @@ def test_studio_background_job_is_resumable(tmp_path: Path):
     assert "Created ResearchDossier" in client.get("/api/projects/job-test/logs").json()["log"]
 
 
+def test_studio_can_restart_any_completed_stage_without_deleting_history(tmp_path: Path):
+    store = ProjectStore(tmp_path / "projects")
+    project_dir = create_demo(store, "restart-demo")
+    marker = project_dir / "07_images/restart-marker.txt"
+    marker.write_text("preserve me", encoding="utf-8")
+    client = TestClient(create_app(store.workspace))
+
+    response = client.post("/api/projects/restart-demo/actions/restart_images", json={})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["restart"]["stage_id"] == "images"
+    assert payload["restart"]["reset_state"] == "SHOTS_APPROVED"
+    assert not marker.exists()
+    archived = project_dir / payload["restart"]["history_path"] / "07_images/restart-marker.txt"
+    assert archived.read_text(encoding="utf-8") == "preserve me"
+    assert (project_dir / "03_narration/narration.json").exists()
+    assert (project_dir / "04_voice/voiceover_master.wav").exists()
+    assert (project_dir / "06_shots/shot_plan.json").exists()
+    assert client.get("/api/projects/restart-demo").json()["state"] == "SHOTS_APPROVED"
+
+
 def test_studio_rejects_project_path_traversal(tmp_path: Path):
     client = TestClient(create_app(tmp_path / "projects"))
-    response = client.get("/api/projects/..%2Fsecrets")
-    assert response.status_code == 404
-
-    artifact = client.get("/artifacts/..%2Fsecrets/file.txt")
-    assert artifact.status_code == 404
+    assert client.get("/api/projects/..%2Fsecrets").status_code == 404
+    assert client.get("/artifacts/..%2Fsecrets/file.txt").status_code == 404
 
 
 def test_orchestrator_routes_profiles_and_prompt_packs(tmp_path: Path):
     client = TestClient(create_app(tmp_path / "projects"))
     payload = client.get("/api/orchestrator").json()
-    assert len(payload["tasks"]) == 17
+    assert len(payload["tasks"]) == 10
+    assert [item["id"] for item in payload["tasks"]] == [
+        "research", "structure", "narration_writer", "voice_generator", "word_alignment",
+        "shot_planner", "image_generator", "animatic_renderer", "video_generator", "final_renderer",
+    ]
     assert payload["active_profile"] == "highest_quality"
     assert payload["active_prompt_pack"] == "aviation_investigation"
+    assert payload["docs_checked_at"] == "2026-07-23"
 
     changed = client.patch(
         "/api/orchestrator",
@@ -123,7 +150,7 @@ def test_orchestrator_routes_profiles_and_prompt_packs(tmp_path: Path):
     assert applied.json()["active_profile"] == "offline"
     assert all(item["provider"] == "mock" for item in applied.json()["tasks"])
 
-    health = client.post("/api/orchestrator/providers/chatgpt_ui/test")
+    health = client.post("/api/orchestrator/providers/manual_upload/test")
     assert health.status_code == 200
     assert health.json()["healthy"] is True
 
@@ -137,17 +164,10 @@ def test_orchestrator_route_is_recorded_on_real_job(tmp_path: Path):
     )
     client.patch(
         "/api/orchestrator",
-        json={
-            "tasks": {
-                "research": {
-                    "provider": "mock",
-                    "model": "Deterministic Demo",
-                    "reasoning_effort": "low",
-                    "fallback_provider": "mock",
-                    "fallback_model": "Deterministic Demo",
-                }
-            }
-        },
+        json={"tasks": {"research": {
+            "provider": "mock", "model": "Deterministic Demo", "reasoning_effort": "low",
+            "fallback_provider": "mock", "fallback_model": "Deterministic Demo",
+        }}},
     )
     started = client.post("/api/projects/route-test/actions/research", json={})
     assert started.status_code == 200
@@ -166,7 +186,21 @@ def test_orchestrator_rejects_incompatible_capability_route(tmp_path: Path):
     client = TestClient(create_app(tmp_path / "projects"))
     response = client.patch(
         "/api/orchestrator",
-        json={"tasks": {"image_generator": {"provider": "codex", "model": "gpt-5.6"}}},
+        json={"tasks": {"image_generator": {"provider": "codex", "model": "gpt-5.6-sol"}}},
     )
     assert response.status_code == 400
     assert "cannot execute image" in response.json()["detail"]
+
+
+def test_orchestrator_rejects_unsupported_media_resolution(tmp_path: Path):
+    client = TestClient(create_app(tmp_path / "projects"))
+    response = client.patch(
+        "/api/orchestrator",
+        json={"tasks": {"video_generator": {
+            "provider": "grok_cli", "model": "grok-imagine-video",
+            "resolution": "1080p", "aspect_ratio": "16:9", "duration_seconds": 8,
+            "fallback_provider": "gemini_api", "fallback_model": "veo-3.1-fast-generate-preview",
+        }}},
+    )
+    assert response.status_code == 400
+    assert "Resolution 1080p is not supported" in response.json()["detail"]
