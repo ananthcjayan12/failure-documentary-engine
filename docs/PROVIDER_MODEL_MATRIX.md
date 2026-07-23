@@ -116,7 +116,7 @@ Available route selections:
 - `gemini-2.5-flash`
 - `gemini-2.5-flash-lite`
 
-The native adapter invokes headless mode with `--output-format json`, reads the documented top-level `response` field, extracts the model's strict JSON object, and then validates it against the stage contract. It does not incorrectly treat the Gemini CLI envelope itself as the pipeline response.
+The native adapter invokes headless mode with `--output-format json`, reads the documented top-level `response` field, extracts the model's strict JSON object, and validates it against the stage contract. It does not incorrectly treat the Gemini CLI envelope itself as the pipeline response.
 
 Requirement: `gemini` on `PATH` and Gemini CLI authentication completed.
 
@@ -174,12 +174,12 @@ Models and selectable output sizes:
 
 | Model | Output sizes |
 |---|---|
-| `gemini-3.1-flash-image` | 0.5K, 1K, 2K, 4K |
+| `gemini-3.1-flash-image` | 512, 1K, 2K, 4K |
 | `gemini-3.1-flash-lite-image` | 1K |
 | `gemini-3-pro-image` | 1K, 2K, 4K |
 | `gemini-2.5-flash-image` | 1K |
 
-The router excludes retired image endpoints and validates model-specific size choices before generation.
+The adapter prefers the current Interactions image response contract when the installed Google Gen AI SDK supports it and falls back to the documented GenerateContent image contract for older SDK releases. The router excludes retired image endpoints and validates model-specific size choices before generation.
 
 ## Video providers
 
@@ -197,11 +197,11 @@ Selectable durations exposed by the Studio: 5, 6, 8, 10, and 12 seconds. The exa
 | Model | Resolutions | Provider durations |
 |---|---|---|
 | `gemini-omni-flash-preview` | 720p | 3–10 seconds |
-| `veo-3.1-generate-preview` | 720p, 1080p, 4K | 4, 6, or 8 seconds |
-| `veo-3.1-fast-generate-preview` | 720p, 1080p, 4K | 4, 6, or 8 seconds |
+| `veo-3.1-generate-preview` | 720p, 1080p, 4k | 4, 6, or 8 seconds |
+| `veo-3.1-fast-generate-preview` | 720p, 1080p, 4k | 4, 6, or 8 seconds |
 | `veo-3.1-lite-generate-preview` | 720p, 1080p | 4, 6, or 8 seconds |
 
-Retired Veo 2 and Veo 3.0 routes are intentionally excluded.
+The provider API uses lowercase `4k`. Veo 3.1 requests at 1080p or 4k require an eight-second provider generation; the adapter enforces that rule and the documentary engine trims the result to the exact voice-led shot duration. Retired Veo 2 and Veo 3.0 routes are intentionally excluded.
 
 ## Audio and alignment
 
