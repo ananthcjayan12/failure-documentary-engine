@@ -15,6 +15,8 @@ from .models import (
     ShotPlan,
 )
 from .narration import clean_spoken_text, generate_voice, performance_tags, validate_tagged_text
+from .assets import generate_image_prompts
+from .optimizer import optimize_shots
 from .project import ProjectStore
 from .prompts import render_prompt
 from .reports import research_markdown, script_markdown, shots_markdown, structure_markdown
@@ -118,10 +120,16 @@ def generate_voice_stage(
     force: bool = False,
 ) -> AudioManifest:
     store.transition(project_id, ProjectState.VOICE_GENERATING)
-    manifest = generate_voice(
-        store.project_dir(project_id), provider=provider, model=model, voice=voice,
-        paragraph_ids=paragraph_ids, force=force,
-    )
+    try:
+        manifest = generate_voice(
+            store.project_dir(project_id), provider=provider, model=model, voice=voice,
+            paragraph_ids=paragraph_ids, force=force,
+        )
+    except Exception:
+        # Generation has not produced an artifact for review. Restore the last
+        # valid review gate so the user can correct the provider setup and retry.
+        store.transition(project_id, ProjectState.NARRATION_APPROVED)
+        raise
     store.transition(project_id, ProjectState.VOICE_REVIEW)
     return manifest
 
@@ -209,3 +217,13 @@ def generate_shots(
     (project / "06_shots/shot_plan.md").write_text(shots_markdown(shots), encoding="utf-8")
     store.transition(project_id, ProjectState.SHOTS_REVIEW)
     return shots
+
+
+def generate_master_assets(store: ProjectStore, project_id: str):
+    """Cluster approved shot divisions into the bounded reusable-asset plan."""
+    project = store.project_dir(project_id)
+    brief = store.brief(project_id)
+    shots = load_model(project / "06_shots/shot_plan.json", ShotPlan)
+    plan = generate_image_prompts(optimize_shots(shots, brief.maximum_master_assets), shots)
+    write_json(project / "05_master_assets/master_assets.json", plan)
+    return plan

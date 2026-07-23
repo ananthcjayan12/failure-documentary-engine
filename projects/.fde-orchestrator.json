@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 4,
   "active_profile": "custom",
   "active_prompt_pack": "aviation_investigation",
   "tasks": {
@@ -7,187 +7,160 @@
       "provider": "codex",
       "model": "gpt-5.6-sol",
       "reasoning_effort": "high",
-      "temperature": 0.25,
-      "timeout_seconds": 1200,
+      "temperature": 0.2,
+      "timeout_seconds": 1500,
       "retry_count": 1,
       "fallback_provider": "anthropic_api",
       "fallback_model": "claude-sonnet-5",
-      "enabled": true
-    },
-    "fact_verification": {
-      "provider": "codex",
-      "model": "gpt-5.6-sol",
-      "reasoning_effort": "high",
-      "temperature": 0.1,
-      "timeout_seconds": 900,
-      "retry_count": 1,
-      "fallback_provider": "anthropic_api",
-      "fallback_model": "claude-sonnet-5",
+      "quality": "",
+      "resolution": "",
+      "aspect_ratio": "",
+      "duration_seconds": 0,
+      "voice": "",
       "enabled": true
     },
     "structure": {
       "provider": "anthropic_api",
-      "model": "claude-sonnet-5",
+      "model": "claude-opus-4-8",
       "reasoning_effort": "high",
-      "temperature": 0.55,
-      "timeout_seconds": 1200,
+      "temperature": 0.35,
+      "timeout_seconds": 1500,
       "retry_count": 1,
       "fallback_provider": "codex",
       "fallback_model": "gpt-5.6-sol",
+      "quality": "",
+      "resolution": "",
+      "aspect_ratio": "",
+      "duration_seconds": 0,
+      "voice": "",
       "enabled": true
     },
-    "script": {
+    "narration_writer": {
       "provider": "anthropic_api",
       "model": "claude-sonnet-5",
       "reasoning_effort": "high",
-      "temperature": 0.65,
+      "temperature": 0.45,
       "timeout_seconds": 1800,
       "retry_count": 1,
       "fallback_provider": "codex",
       "fallback_model": "gpt-5.6-sol",
+      "quality": "",
+      "resolution": "",
+      "aspect_ratio": "",
+      "duration_seconds": 0,
+      "voice": "",
       "enabled": true
     },
-    "script_qa": {
-      "provider": "codex",
-      "model": "gpt-5.6-sol",
-      "reasoning_effort": "high",
-      "temperature": 0.15,
-      "timeout_seconds": 900,
+    "voice_generator": {
+      "provider": "google_tts",
+      "model": "gemini-3.1-flash-tts-preview",
+      "reasoning_effort": "standard",
+      "temperature": 0,
+      "timeout_seconds": 1800,
       "retry_count": 1,
-      "fallback_provider": "anthropic_api",
-      "fallback_model": "claude-sonnet-5",
+      "fallback_provider": "manual_upload",
+      "fallback_model": "External narration",
+      "quality": "balanced",
+      "resolution": "",
+      "aspect_ratio": "",
+      "duration_seconds": 0,
+      "voice": "Kore",
+      "enabled": true
+    },
+    "word_alignment": {
+      "provider": "whisper_local",
+      "model": "base.en",
+      "reasoning_effort": "standard",
+      "temperature": 0,
+      "timeout_seconds": 3600,
+      "retry_count": 0,
+      "fallback_provider": "mock",
+      "fallback_model": "Deterministic Demo",
+      "quality": "",
+      "resolution": "",
+      "aspect_ratio": "",
+      "duration_seconds": 0,
+      "voice": "",
       "enabled": true
     },
     "shot_planner": {
-      "provider": "claude_code",
+      "provider": "anthropic_api",
       "model": "claude-sonnet-5",
       "reasoning_effort": "medium",
-      "temperature": 0.45,
-      "timeout_seconds": 1200,
+      "temperature": 0.25,
+      "timeout_seconds": 1500,
       "retry_count": 1,
       "fallback_provider": "codex",
       "fallback_model": "gpt-5.6-sol",
-      "enabled": true
-    },
-    "asset_optimizer": {
-      "provider": "codex",
-      "model": "gpt-5.6-terra",
-      "reasoning_effort": "medium",
-      "temperature": 0.15,
-      "timeout_seconds": 600,
-      "retry_count": 1,
-      "fallback_provider": "mock",
-      "fallback_model": "Deterministic Demo",
-      "enabled": true
-    },
-    "image_prompt_writer": {
-      "provider": "codex",
-      "model": "gpt-5.6-sol",
-      "reasoning_effort": "medium",
-      "temperature": 0.55,
-      "timeout_seconds": 900,
-      "retry_count": 1,
-      "fallback_provider": "anthropic_api",
-      "fallback_model": "claude-sonnet-5",
+      "quality": "",
+      "resolution": "",
+      "aspect_ratio": "",
+      "duration_seconds": 0,
+      "voice": "",
       "enabled": true
     },
     "image_generator": {
       "provider": "grok_cli",
-      "model": "authenticated-default",
-      "reasoning_effort": "standard",
-      "temperature": 0.4,
-      "timeout_seconds": 3600,
-      "retry_count": 1,
-      "fallback_provider": "chatgpt_ui",
-      "fallback_model": "ChatGPT Images",
-      "enabled": true
-    },
-    "image_qc": {
-      "provider": "codex",
-      "model": "gpt-5.6-sol",
-      "reasoning_effort": "medium",
-      "temperature": 0.1,
-      "timeout_seconds": 900,
-      "retry_count": 1,
-      "fallback_provider": "mock",
-      "fallback_model": "Deterministic Demo",
-      "enabled": true
-    },
-    "animation_prompt_writer": {
-      "provider": "codex",
-      "model": "gpt-5.6-sol",
-      "reasoning_effort": "medium",
-      "temperature": 0.45,
-      "timeout_seconds": 900,
-      "retry_count": 1,
-      "fallback_provider": "anthropic_api",
-      "fallback_model": "claude-sonnet-5",
-      "enabled": true
-    },
-    "video_generator": {
-      "provider": "grok_cli",
-      "model": "authenticated-default",
-      "reasoning_effort": "standard",
-      "temperature": 0.4,
-      "timeout_seconds": 3600,
-      "retry_count": 1,
-      "fallback_provider": "grok_ui",
-      "fallback_model": "Grok Imagine",
-      "enabled": true
-    },
-    "video_qc": {
-      "provider": "codex",
-      "model": "gpt-5.6-sol",
-      "reasoning_effort": "medium",
-      "temperature": 0.1,
-      "timeout_seconds": 900,
-      "retry_count": 1,
-      "fallback_provider": "mock",
-      "fallback_model": "Deterministic Demo",
-      "enabled": true
-    },
-    "voice_generator": {
-      "provider": "manual_upload",
-      "model": "External narration",
+      "model": "grok-imagine-image-quality",
       "reasoning_effort": "standard",
       "temperature": 0,
-      "timeout_seconds": 0,
-      "retry_count": 0,
-      "fallback_provider": "manual_upload",
-      "fallback_model": "External narration",
-      "enabled": true
-    },
-    "timeline_builder": {
-      "provider": "codex",
-      "model": "gpt-5.6-terra",
-      "reasoning_effort": "low",
-      "temperature": 0.1,
-      "timeout_seconds": 600,
+      "timeout_seconds": 3600,
       "retry_count": 1,
-      "fallback_provider": "mock",
-      "fallback_model": "Deterministic Demo",
+      "fallback_provider": "gemini_api",
+      "fallback_model": "gemini-3.1-flash-image",
+      "quality": "quality",
+      "resolution": "2K",
+      "aspect_ratio": "16:9",
+      "duration_seconds": 0,
+      "voice": "",
       "enabled": true
     },
-    "composition_renderer": {
-      "provider": "hyperframes",
-      "model": "HyperFrames 0.7.62",
+    "animatic_renderer": {
+      "provider": "ffmpeg",
+      "model": "FFmpeg deterministic",
       "reasoning_effort": "standard",
       "temperature": 0,
       "timeout_seconds": 14400,
       "retry_count": 1,
-      "fallback_provider": "ffmpeg",
-      "fallback_model": "FFmpeg concat",
+      "fallback_provider": "hyperframes",
+      "fallback_model": "HyperFrames 0.7.62",
+      "quality": "",
+      "resolution": "720p",
+      "aspect_ratio": "16:9",
+      "duration_seconds": 0,
+      "voice": "",
       "enabled": true
     },
-    "final_qc": {
-      "provider": "codex",
-      "model": "gpt-5.6-sol",
-      "reasoning_effort": "high",
-      "temperature": 0.1,
-      "timeout_seconds": 900,
+    "video_generator": {
+      "provider": "grok_cli",
+      "model": "grok-imagine-video-1.5",
+      "reasoning_effort": "standard",
+      "temperature": 0,
+      "timeout_seconds": 7200,
       "retry_count": 1,
-      "fallback_provider": "anthropic_api",
-      "fallback_model": "claude-sonnet-5",
+      "fallback_provider": "gemini_api",
+      "fallback_model": "veo-3.1-fast-generate-preview",
+      "quality": "standard",
+      "resolution": "720p",
+      "aspect_ratio": "16:9",
+      "duration_seconds": 8,
+      "voice": "",
+      "enabled": true
+    },
+    "final_renderer": {
+      "provider": "ffmpeg",
+      "model": "FFmpeg deterministic",
+      "reasoning_effort": "standard",
+      "temperature": 0,
+      "timeout_seconds": 14400,
+      "retry_count": 1,
+      "fallback_provider": "hyperframes",
+      "fallback_model": "HyperFrames 0.7.62",
+      "quality": "",
+      "resolution": "1080p",
+      "aspect_ratio": "16:9",
+      "duration_seconds": 0,
+      "voice": "",
       "enabled": true
     }
   },
@@ -197,12 +170,22 @@
       "media_command_template": "",
       "enabled": true
     },
-    "claude_code": {
-      "command_template": "claude --model {model} -p \"$(cat {prompt})\" > {output}",
+    "anthropic_api": {
+      "command_template": "",
       "media_command_template": "",
       "enabled": true
     },
-    "anthropic_api": {
+    "grok_cli": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "kimi_api": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "gemini_api": {
       "command_template": "",
       "media_command_template": "",
       "enabled": true
@@ -212,32 +195,17 @@
       "media_command_template": "",
       "enabled": true
     },
-    "grok_cli": {
+    "openai_image_api": {
       "command_template": "",
       "media_command_template": "",
       "enabled": true
     },
-    "custom_cli": {
+    "google_tts": {
       "command_template": "",
       "media_command_template": "",
       "enabled": true
     },
-    "chatgpt_ui": {
-      "command_template": "",
-      "media_command_template": "",
-      "enabled": true
-    },
-    "grok_ui": {
-      "command_template": "",
-      "media_command_template": "",
-      "enabled": true
-    },
-    "manual_upload": {
-      "command_template": "",
-      "media_command_template": "",
-      "enabled": true
-    },
-    "hyperframes": {
+    "whisper_local": {
       "command_template": "",
       "media_command_template": "",
       "enabled": true
@@ -247,15 +215,25 @@
       "media_command_template": "",
       "enabled": true
     },
-    "mock": {
+    "hyperframes": {
       "command_template": "",
       "media_command_template": "",
       "enabled": true
     },
-    "future_api": {
+    "manual_upload": {
       "command_template": "",
       "media_command_template": "",
-      "enabled": false
+      "enabled": true
+    },
+    "custom_cli": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": true
+    },
+    "mock": {
+      "command_template": "",
+      "media_command_template": "",
+      "enabled": true
     }
   },
   "prompt_packs": {
@@ -292,15 +270,15 @@
   },
   "rules": [
     {
-      "id": "long_script_quality",
-      "label": "Long documentary script",
+      "id": "long_narration_quality",
+      "label": "Long documentary narration",
       "enabled": true,
-      "task_id": "script",
+      "task_id": "narration_writer",
       "field": "duration_seconds",
       "operator": ">",
       "value": 600,
-      "provider": "claude_code",
-      "model": "claude-opus-4-8",
+      "provider": "anthropic_api",
+      "model": "claude-fable-5",
       "reasoning_effort": "high"
     }
   ]

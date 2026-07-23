@@ -8,6 +8,7 @@ const state = {
   assets: [],
   assetSummary: {},
   timeline: {entries: [], total_seconds: 0},
+  jobLog: "",
   view: location.hash.replace("#", "") || "dashboard",
   selectedStageId: null,
   assetMode: "image",
@@ -70,12 +71,13 @@ async function loadBootstrap(){
 
 async function loadActiveProject(render=true){
   if(!state.activeProjectId){state.activeProject=null;state.assets=[];state.timeline={entries:[],total_seconds:0};if(render)renderCurrentView();return;}
-  const [project,assetPayload,timeline]=await Promise.all([
+  const [project,assetPayload,timeline,logPayload]=await Promise.all([
     request(`/api/projects/${encodeURIComponent(state.activeProjectId)}`),
     request(`/api/projects/${encodeURIComponent(state.activeProjectId)}/assets`),
     request(`/api/projects/${encodeURIComponent(state.activeProjectId)}/timeline`),
+    request(`/api/projects/${encodeURIComponent(state.activeProjectId)}/logs?lines=240`),
   ]);
-  state.activeProject=project; state.assets=assetPayload.assets||[]; state.assetSummary=assetPayload.summary||{}; state.timeline=timeline||{entries:[],total_seconds:0};
+  state.activeProject=project; state.assets=assetPayload.assets||[]; state.assetSummary=assetPayload.summary||{}; state.timeline=timeline||{entries:[],total_seconds:0}; state.jobLog=logPayload?.log||"";
   if(!state.selectedStageId||!project.stages.some(item=>item.id===state.selectedStageId)) state.selectedStageId=project.stages.find(item=>["active","review"].includes(item.status))?.id||project.stages.at(-1)?.id;
   managePolling(); if(render){renderShell();renderCurrentView();}
 }
@@ -112,10 +114,10 @@ function restartControls(stage,disabled){
 function renderProduction(){
   const root=$("#view-production"); const p=state.activeProject; if(!p){root.innerHTML=empty("No active project","Create a project to open the production pipeline.");return;}
   const selected=p.stages.find(item=>item.id===state.selectedStageId)||p.stages[0]; const running=p.job?.status==="running";
-  root.innerHTML=`<section class="production-layout"><aside class="stage-rail">${p.stages.map(stage=>`<button class="stage-step ${stage.status} ${stage.id===selected.id?"is-selected":""}" data-stage-id="${stage.id}"><span>${stage.number}</span><div><strong>${escapeHtml(stage.short_title)}</strong><small>${escapeHtml(stage.status)}</small></div></button>`).join("")}</aside><div class="production-main"><section class="panel"><header class="panel-heading"><div><p class="eyebrow">Stage ${selected.number}</p><h2>${escapeHtml(selected.title)}</h2><p>${escapeHtml(selected.description)}</p></div><span class="status-pill ${selected.status}">${escapeHtml(selected.status)}</span></header>${selected.action?`<div class="next-action-card"><h3>${escapeHtml(selected.action.label)}</h3>${actionButton(selected.action,running)}</div>`:""}${restartControls(selected,running)}${selected.artifacts?.length?`<div class="artifact-grid" style="margin-top:18px">${selected.artifacts.map(item=>`<article class="artifact-card"><span data-icon="${item.kind==="image"?"image":item.kind==="video"?"video":"file"}"></span><span><strong>${escapeHtml(item.name)}</strong><small>${formatBytes(item.size)}</small></span><a href="${escapeHtml(item.url)}" target="_blank">Open ↗</a></article>`).join("")}</div>`:`<p class="muted-copy">No artifacts yet for this stage.</p>`}</section>${jobPanel(p.job)}</div></section>`;
+  root.innerHTML=`<section class="production-layout"><aside class="stage-rail">${p.stages.map(stage=>`<button class="stage-step ${stage.status} ${stage.id===selected.id?"is-selected":""}" data-stage-id="${stage.id}"><span>${stage.number}</span><div><strong>${escapeHtml(stage.short_title)}</strong><small>${escapeHtml(stage.status)}</small></div></button>`).join("")}</aside><div class="production-main"><section class="panel"><header class="panel-heading"><div><p class="eyebrow">Stage ${selected.number}</p><h2>${escapeHtml(selected.title)}</h2><p>${escapeHtml(selected.description)}</p></div><span class="status-pill ${selected.status}">${escapeHtml(selected.status)}</span></header>${selected.action?`<div class="next-action-card"><h3>${escapeHtml(selected.action.label)}</h3>${actionButton(selected.action,running)}</div>`:""}${restartControls(selected,running)}${selected.artifacts?.length?`<div class="artifact-grid" style="margin-top:18px">${selected.artifacts.map(item=>`<article class="artifact-card"><span data-icon="${item.kind==="image"?"image":item.kind==="video"?"video":"file"}"></span><span><strong>${escapeHtml(item.name)}</strong><small>${formatBytes(item.size)}</small></span><a href="${escapeHtml(item.url)}" target="_blank">Open ↗</a></article>`).join("")}</div>`:`<p class="muted-copy">No artifacts yet for this stage.</p>`}</section>${jobPanel(p.job,state.jobLog)}</div></section>`;
 }
 
-function jobPanel(job={status:"idle"}){return `<section class="panel job-panel"><div class="job-summary"><div><strong>${escapeHtml(job.label||"Process log")}</strong><small>${job.started_at?formatDate(job.started_at):"No active process"}</small></div><span class="status-indicator ${job.status}">${escapeHtml(job.status||"idle")}</span></div>${job.routing?`<div class="route-summary"><strong>${escapeHtml(job.routing.provider_label||job.routing.provider)} · ${escapeHtml(job.routing.model||"")}</strong><small>${[job.routing.resolution,job.routing.quality,job.routing.voice].filter(Boolean).join(" · ")}</small></div>`:""}${job.status==="running"?`<button class="danger-button" data-stop-job>Stop after current process</button>`:""}</section>`;}
+function jobPanel(job={status:"idle"},log=""){const working=job.status==="running";const showLog=working||job.status==="failed";const emptyLog=working?"Waiting for process output…":"No process output was captured.";return `<section class="panel job-panel"><div class="job-summary"><div><strong>${escapeHtml(job.label||"Process log")}</strong><small>${job.started_at?formatDate(job.started_at):"No active process"}</small></div><span class="status-indicator ${job.status}">${escapeHtml(job.status||"idle")}</span></div>${job.routing?`<div class="route-summary"><strong>${escapeHtml(job.routing.provider_label||job.routing.provider)} · ${escapeHtml(job.routing.model||"")}</strong><small>${[job.routing.resolution,job.routing.quality,job.routing.voice].filter(Boolean).join(" · ")}</small></div>`:""}${showLog?`<pre class="log-console" aria-live="polite">${escapeHtml(log||emptyLog)}</pre>`:""}${working?`<button class="danger-button" data-stop-job>Stop after current process</button>`:""}</section>`;}
 
 function renderAssets(){
   const root=$("#view-assets"); if(!state.activeProject){root.innerHTML=empty("No active project","Open a project first.");return;}

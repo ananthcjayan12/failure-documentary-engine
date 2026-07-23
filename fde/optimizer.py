@@ -10,6 +10,7 @@ from .models import MasterAsset, MasterAssetPlan, Shot, ShotPlan
 STOPWORDS = {
     "the", "a", "an", "and", "or", "of", "to", "for", "with", "in", "on", "at",
     "scene", "shot", "visual", "reusable", "support", "distinct", "chapter",
+    "technically", "credible", "documentary", "clearly", "supports", "narration", "exact", "spoken", "beat",
 }
 
 
@@ -68,7 +69,10 @@ def optimize_shots(shot_plan: ShotPlan, maximum_assets: int) -> MasterAssetPlan:
             if score > best_score:
                 best_score = score
                 best_cluster = cluster
-        threshold = 0.54 if len(clusters) < maximum_assets else -1.0
+        # A shared media type, chapter, or generic "support" role is not enough
+        # to make two narration beats visually interchangeable.  Hold out for a
+        # strong semantic match until the asset budget is actually exhausted.
+        threshold = 0.72 if len(clusters) < maximum_assets else -1.0
         if best_cluster is not None and best_score >= threshold:
             best_cluster.shots.append(shot)
         elif len(clusters) < maximum_assets:

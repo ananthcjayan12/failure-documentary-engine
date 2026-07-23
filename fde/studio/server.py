@@ -129,6 +129,9 @@ def create_app(workspace: Path | str = "projects") -> FastAPI:
             artifact, state = approvals[action]
             if artifact in {"structure", "narration", "shots"}:
                 service.store.approve_version(project_id, artifact)
+            if action == "approve_shots":
+                from ..pipeline import generate_master_assets
+                generate_master_assets(service.store, project_id)
             service.store.transition(project_id, state)
             return {"status": "completed", "action": action, "state": state.value}
         payload = payload or {}

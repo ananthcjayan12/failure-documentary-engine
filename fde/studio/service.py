@@ -110,7 +110,7 @@ STAGES = [
     ),
     StageDefinition(
         "images", 5, "Images", "Images",
-        "Generate and approve one primary 16:9 documentary image for every shot.",
+        "Generate and approve one primary 16:9 documentary image for every reusable master asset.",
         (ProjectState.SHOTS_APPROVED, ProjectState.IMAGES_GENERATING, ProjectState.IMAGES_REVIEW, ProjectState.IMAGES_APPROVED),
         ("07_images/jobs.json",),
     ),

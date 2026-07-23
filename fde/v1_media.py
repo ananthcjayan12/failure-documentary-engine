@@ -19,6 +19,7 @@ from .models import (
     V1MediaManifest,
     utc_now,
 )
+from .models import MasterAssetPlan
 from .project import ProjectStore
 from .providers.media_factory import generate_one
 
@@ -53,6 +54,25 @@ def _video_path(project_dir: Path, shot_id: str) -> Path:
     return project_dir / "09_videos" / shot_id / "approved.mp4"
 
 
+def _asset_sources(project_dir: Path, shots: ShotPlan) -> tuple[list[str], dict[str, str], dict[str, str]]:
+    """Return reusable media IDs and their shot/prompt mappings.
+
+    Older projects without an asset plan remain readable, but all newly approved
+    shot plans receive a bounded master-asset plan before image work begins.
+    """
+    path = project_dir / "05_master_assets/master_assets.json"
+    if not path.exists():
+        ids = [shot.shot_id for shot in shots.shots]
+        return ids, {shot.shot_id: shot.shot_id for shot in shots.shots}, {shot.shot_id: shot.shot_id for shot in shots.shots}
+    plan = load_model(path, MasterAssetPlan)
+    source_for_shot = {shot_id: asset.asset_id for asset in plan.assets for shot_id in asset.linked_shots}
+    missing = [shot.shot_id for shot in shots.shots if shot.shot_id not in source_for_shot]
+    if missing:
+        raise RuntimeError(f"master asset plan leaves shots uncovered: {', '.join(missing)}")
+    first_shot = {asset.asset_id: asset.linked_shots[0] for asset in plan.assets}
+    return [asset.asset_id for asset in plan.assets], source_for_shot, first_shot
+
+
 def _mock_image(destination: Path, shot_id: str, narration: str) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     image = Image.new("RGB", (1600, 900), "#07131f")
@@ -82,18 +102,24 @@ def prepare_media_jobs(
     project_dir = Path(project_dir)
     route = route or _route_from_env(media_type)
     shots = _load_shots(project_dir)
+    source_ids, _, first_shot = _asset_sources(project_dir, shots)
+    asset_plan_path = project_dir / "05_master_assets/master_assets.json"
+    assets = {item.asset_id: item for item in load_model(asset_plan_path, MasterAssetPlan).assets} if asset_plan_path.exists() else {}
     existing_path = _manifest_path(project_dir, media_type)
     existing = load_model(existing_path, V1MediaManifest) if existing_path.exists() else None
     existing_by_id = {item.shot_id: item for item in existing.jobs} if existing else {}
     resolution = str(route.get("resolution") or ("2K" if media_type == "image" else "720p"))
     aspect_ratio = str(route.get("aspect_ratio") or "16:9")
     jobs: list[V1MediaJob] = []
-    for shot in shots.shots:
-        old = existing_by_id.get(shot.shot_id)
-        prompt = shot.image_prompt if media_type == "image" else shot.video_prompt
-        output = str((_image_path(project_dir, shot.shot_id) if media_type == "image" else _video_path(project_dir, shot.shot_id)).relative_to(project_dir))
-        reference = str(_image_path(project_dir, shot.shot_id).relative_to(project_dir)) if media_type == "video" else None
-        duration = 0 if media_type == "image" else shot.duration
+    shot_by_id = {shot.shot_id: shot for shot in shots.shots}
+    for source_id in source_ids:
+        shot = shot_by_id[first_shot[source_id]]
+        old = existing_by_id.get(source_id)
+        asset = assets.get(source_id)
+        prompt = (asset.image_prompt if media_type == "image" else asset.video_prompt) if asset else (shot.image_prompt if media_type == "image" else shot.video_prompt)
+        output = str((_image_path(project_dir, source_id) if media_type == "image" else _video_path(project_dir, source_id)).relative_to(project_dir))
+        reference = str(_image_path(project_dir, source_id).relative_to(project_dir)) if media_type == "video" else None
+        duration = 0 if media_type == "image" else 5
         if (
             old and old.prompt == prompt and old.duration_seconds == duration
             and old.resolution == resolution and old.aspect_ratio == aspect_ratio
@@ -101,12 +127,12 @@ def prepare_media_jobs(
             jobs.append(old)
             continue
         jobs.append(V1MediaJob(
-            job_id=f"{media_type.upper()}_{shot.shot_id}", shot_id=shot.shot_id,
+            job_id=f"{media_type.upper()}_{source_id}", shot_id=source_id,
             media_type=media_type, status="pending", prompt=prompt, output=output,
             reference=reference, duration_seconds=duration,
             resolution=resolution, aspect_ratio=aspect_ratio,
         ))
-        job_dir = project_dir / ("07_images" if media_type == "image" else "09_videos") / shot.shot_id
+        job_dir = project_dir / ("07_images" if media_type == "image" else "09_videos") / source_id
         job_dir.mkdir(parents=True, exist_ok=True)
         (job_dir / "prompt.txt").write_text(prompt.rstrip() + "\n", encoding="utf-8")
     manifest = V1MediaManifest(project_id=shots.project_id, media_type=media_type, jobs=jobs)
@@ -132,9 +158,11 @@ def generate_media_jobs(
     route = route or _route_from_env(media_type)
     manifest = prepare_media_jobs(project_dir, media_type, route=route)
     wanted = set(shot_ids or [])
-    shots = {item.shot_id: item for item in _load_shots(project_dir).shots}
+    shot_plan = _load_shots(project_dir)
+    _, source_for_shot, first_shot = _asset_sources(project_dir, shot_plan)
+    shots = {item.shot_id: item for item in shot_plan.shots}
     for job in manifest.jobs:
-        if wanted and job.shot_id not in wanted:
+        if wanted and job.shot_id not in wanted and not any(source_for_shot.get(shot_id) == job.shot_id for shot_id in wanted):
             continue
         output = project_dir / str(job.output)
         if output.exists() and job.status in {"review", "approved"} and not force:
@@ -152,7 +180,7 @@ def generate_media_jobs(
         try:
             provider = str(route.get("provider", "mock"))
             if provider == "mock" and media_type == "image":
-                _mock_image(output, job.shot_id, shots[job.shot_id].narration_text)
+                _mock_image(output, job.shot_id, shots[first_shot[job.shot_id]].narration_text)
                 record = {"provider": "mock", "model": route.get("model"), "path": str(output)}
             else:
                 provider_duration = float(route.get("duration_seconds") or job.duration_seconds)
@@ -223,9 +251,10 @@ def render_animatic(project_dir: Path, *, width: int = 1280, height: int = 720, 
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg is required to render the image-and-sound animatic")
     shots = _load_shots(project_dir)
+    _, source_for_shot, _ = _asset_sources(project_dir, shots)
     images = load_model(project_dir / "07_images/jobs.json", V1MediaManifest)
     status = {item.shot_id: item for item in images.jobs}
-    missing = [shot.shot_id for shot in shots.shots if status.get(shot.shot_id) is None or status[shot.shot_id].status != "approved"]
+    missing = [shot.shot_id for shot in shots.shots if status.get(source_for_shot[shot.shot_id]) is None or status[source_for_shot[shot.shot_id]].status != "approved"]
     if missing:
         raise RuntimeError(f"approve every shot image before animatic rendering: {', '.join(missing)}")
     root = project_dir / "08_animatic"
@@ -236,7 +265,7 @@ def render_animatic(project_dir: Path, *, width: int = 1280, height: int = 720, 
     clips: list[Path] = []
     sound_plan: list[dict[str, Any]] = []
     for index, shot in enumerate(shots.shots, start=1):
-        source = _image_path(project_dir, shot.shot_id)
+        source = _image_path(project_dir, source_for_shot[shot.shot_id])
         target = work / f"clip_{index:04d}.mp4"
         zoom = "zoompan=z='min(zoom+0.00035,1.025)':d=1"
         vf = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},{zoom}:s={width}x{height}:fps={fps}"
@@ -277,6 +306,7 @@ def render_final_preview(project_dir: Path, *, width: int = 1920, height: int = 
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg is required to render the final preview")
     shots = _load_shots(project_dir)
+    _, source_for_shot, _ = _asset_sources(project_dir, shots)
     image_jobs = load_model(project_dir / "07_images/jobs.json", V1MediaManifest)
     images = {item.shot_id: item for item in image_jobs.jobs}
     video_path = project_dir / "09_videos/jobs.json"
@@ -289,8 +319,9 @@ def render_final_preview(project_dir: Path, *, width: int = 1920, height: int = 
     clips: list[Path] = []
     decisions: list[dict[str, Any]] = []
     for index, shot in enumerate(shots.shots, start=1):
-        video_job = videos.get(shot.shot_id)
-        source_video = _video_path(project_dir, shot.shot_id)
+        source_id = source_for_shot[shot.shot_id]
+        video_job = videos.get(source_id)
+        source_video = _video_path(project_dir, source_id)
         target = work / f"clip_{index:04d}.mp4"
         vf = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps={fps}"
         if video_job and video_job.status == "approved" and source_video.exists():
@@ -300,8 +331,8 @@ def render_final_preview(project_dir: Path, *, width: int = 1920, height: int = 
             ])
             kind, source = "video", source_video
         else:
-            image_job = images.get(shot.shot_id)
-            source_image = _image_path(project_dir, shot.shot_id)
+            image_job = images.get(source_id)
+            source_image = _image_path(project_dir, source_id)
             if not image_job or image_job.status != "approved" or not source_image.exists():
                 raise RuntimeError(f"shot {shot.shot_id} has neither approved video nor approved image")
             _run([

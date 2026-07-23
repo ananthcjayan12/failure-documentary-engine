@@ -21,6 +21,7 @@ from .pipeline import (
     generate_structure,
     generate_timing_stage,
     generate_voice_stage,
+    generate_master_assets,
 )
 from .project import ProjectStore
 from .v1_media import (
@@ -139,6 +140,8 @@ def approve_stage(project_id: str, stage: str, workspace: Path = Path("projects"
     artifact, state = mapping[stage]
     if stage in {"structure", "narration", "script", "shots"}:
         s.approve_version(project_id, artifact)
+    if stage == "shots":
+        generate_master_assets(s, project_id)
     s.transition(project_id, state)
     console.print(f"[green]Approved {stage}[/green]")
 

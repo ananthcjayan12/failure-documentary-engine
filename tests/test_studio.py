@@ -35,6 +35,8 @@ def test_studio_bootstrap_and_modern_routes(tmp_path: Path):
     assert app_js.status_code == 200
     assert "Restart from here" in app_js.text
     assert "Run this step again" in app_js.text
+    assert "Waiting for process output" in app_js.text
+    assert "/logs?lines=240" in app_js.text
 
 
 def test_studio_project_creation_and_settings(tmp_path: Path):

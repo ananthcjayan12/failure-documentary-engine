@@ -387,7 +387,7 @@ TASK_DEFINITIONS: list[dict[str, Any]] = [
         "pipeline_stage": "images",
         "group": "Images",
         "capability": "image",
-        "description": "Generate one primary still for each approved shot using the selected model and quality.",
+        "description": "Generate one primary still for each approved reusable master asset using the selected model and quality.",
     },
     {
         "id": "animatic_renderer",
