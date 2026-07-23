@@ -23,13 +23,14 @@ def generate_image(
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is required for GPT Image API")
+    # GPT Image returns base64 image data from the Images API; response_format is not
+    # forced because GPT Image models use their native response contract.
     payload = {
         "model": model,
         "prompt": prompt,
         "size": resolution or "auto",
         "quality": quality or "auto",
         "n": 1,
-        "response_format": "b64_json",
     }
     request = Request(
         API_URL,
