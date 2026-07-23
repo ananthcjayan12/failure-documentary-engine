@@ -1,0 +1,41 @@
+You are designing the reusable visual vocabulary for a premium failure-investigation documentary.
+
+Return strict JSON only matching MasterAssetPlan. No markdown or commentary.
+
+PROJECT BRIEF:
+{{ brief.model_dump_json(indent=2) }}
+
+APPROVED RESEARCH:
+{{ research.model_dump_json(indent=2) }}
+
+APPROVED NARRATION:
+{{ script.model_dump_json(indent=2) }}
+
+IMMUTABLE AUDIO-LED SHOT SKELETON:
+{{ shot_skeleton.model_dump_json(indent=2) }}
+
+REQUIRED MASTER-FOOTAGE STRATEGY:
+{{ strategy.model_dump_json(indent=2) }}
+
+DESIGN TASK:
+Create the documentary's reusable footage vocabulary before editorial shot direction.
+Return exactly the required generated packages:
+- H01–H08: cinematic hero footage for major physical story moments;
+- L01–L08: loopable atmosphere footage for sustained backgrounds and overlays;
+- E01–E08: investigation or reconstruction footage with explicit factual boundaries.
+
+RULES:
+1. The generated packages and the editorial shots are separate artifacts. Do not return a shot plan.
+2. Do not create image_prompt or video_prompt yet. Those are derived only after this package plan is approved.
+3. Every package must link at least one real shot ID from the immutable skeleton.
+4. Every skeleton shot must be covered by at least one package or an explicit non_generated_coverage assignment.
+5. Atmosphere packages must be stationary or nearly stationary, loopable, seamless, overlay-safe, and free of a dominant one-time event.
+6. Hero packages must represent an important physical story moment and provide stable wide and detail crop regions for callbacks.
+7. Investigation packages must declare factual_scope, factual_context_id, reconstruction disclosure, supported overlay families, and replaceable monitor or diagram regions.
+8. Maps, radar tracks, timelines, transcripts, labels, satellite arcs, and technical diagrams are typed OverlaySpec objects. Never bake factual graphics or text into generated imagery.
+9. Never combine unrelated evidence contexts into one factual reconstruction package.
+10. Include allowed reuse operations, crop regions, playback-speed range, overlay-safe zones, continuity requirements, prohibited details, stable opening/ending requirements, and a clear reuse_rationale.
+11. Use only claims supported by the approved research. Do not invent locations, damage, weather, people, instruments, documents, or causal conclusions.
+12. Preserve project_id and maximum_master_assets. Set status to proposal.
+13. Use the configured source_video_duration_seconds for every generated package.
+14. Coded graphics, archive media, deliberate stills, and negative-space moments belong in non_generated_coverage and do not consume the 24 generated-video slots.
