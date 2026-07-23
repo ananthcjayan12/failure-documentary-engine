@@ -16,42 +16,30 @@
         <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
         <span class="brand-copy"><strong>FDE Studio</strong><small>Failure investigations</small></span>
       </a>
-
       <nav class="primary-nav" aria-label="Primary navigation">
         <button class="nav-item is-active" data-nav="dashboard"><span data-icon="home"></span><b>Overview</b></button>
         <button class="nav-item" data-nav="production"><span data-icon="pipeline"></span><b>Production</b></button>
-        <button class="nav-item" data-nav="assets"><span data-icon="assets"></span><b>Assets</b><em id="asset-nav-count">0</em></button>
+        <button class="nav-item" data-nav="assets"><span data-icon="assets"></span><b>Master footage</b><em id="asset-nav-count">0</em></button>
         <button class="nav-item" data-nav="timeline"><span data-icon="timeline"></span><b>Timeline</b></button>
         <button class="nav-item" data-nav="runs"><span data-icon="runs"></span><b>Projects</b><em id="project-nav-count">0</em></button>
         <button class="nav-item" data-nav="orchestrator"><span data-icon="brain"></span><b>AI Orchestrator</b></button>
       </nav>
-
       <div class="sidebar-spacer"></div>
-
       <div class="engine-card" id="engine-card">
         <div class="engine-row"><span class="live-dot"></span><div><strong>Local engine</strong><small id="engine-status">Checking tools…</small></div></div>
         <div class="capability-list" id="capability-list"></div>
       </div>
-
       <button class="nav-item settings-nav" data-nav="settings"><span data-icon="settings"></span><b>Settings</b></button>
     </aside>
-
     <main class="main-shell">
       <header class="topbar">
-        <div class="topbar-copy">
-          <p class="eyebrow" id="page-eyebrow">Production control room</p>
-          <h1 id="page-title">Overview</h1>
-        </div>
+        <div class="topbar-copy"><p class="eyebrow" id="page-eyebrow">Production control room</p><h1 id="page-title">Overview</h1></div>
         <div class="topbar-actions">
-          <label class="project-switcher" id="project-switcher-wrap">
-            <span>Active project</span>
-            <select id="project-switcher"><option value="">No projects</option></select>
-          </label>
+          <label class="project-switcher" id="project-switcher-wrap"><span>Active project</span><select id="project-switcher"><option value="">No projects</option></select></label>
           <button class="icon-button" id="refresh-button" aria-label="Refresh" title="Refresh"><span data-icon="refresh"></span></button>
           <button class="primary-button" id="new-project-button"><span data-icon="plus"></span>New project</button>
         </div>
       </header>
-
       <div class="global-alert is-hidden" id="global-alert" role="alert"></div>
       <section class="page-view is-active" id="view-dashboard"></section>
       <section class="page-view" id="view-production"></section>
@@ -62,7 +50,6 @@
       <section class="page-view" id="view-settings"></section>
     </main>
   </div>
-
   <div class="modal-backdrop is-hidden" id="new-project-modal" aria-hidden="true">
     <div class="modal-card wide-modal" role="dialog" aria-modal="true" aria-labelledby="new-project-title">
       <header class="modal-header"><div><p class="eyebrow">New production</p><h2 id="new-project-title">Create investigation project</h2></div><button class="icon-button modal-close" aria-label="Close">×</button></header>
@@ -71,29 +58,19 @@
         <label><span>Documentary title</span><input name="title" required placeholder="MH370: The Plane That Vanished"></label>
         <label class="full-span"><span>Story idea / investigation brief</span><textarea name="topic" required rows="5" placeholder="Describe what happened, what the documentary should investigate, and any angle you want to emphasize."></textarea></label>
         <label><span>Target duration</span><select name="target_duration_seconds"><option value="300">5 minutes</option><option value="480" selected>8 minutes</option><option value="600">10 minutes</option><option value="720">12 minutes</option></select></label>
-        <label><span>Maximum master assets</span><input name="maximum_master_assets" type="number" min="8" max="60" value="28"></label>
-        <label><span>Master video duration</span><select name="master_video_duration_seconds"><option value="5" selected>5 seconds</option><option value="6">6 seconds</option><option value="8">8 seconds</option></select></label>
+        <label><span>Generated master packages</span><input name="maximum_master_assets" type="number" min="24" max="60" value="24"></label>
+        <label><span>Hero packages</span><input type="number" value="8" disabled></label>
+        <label><span>Atmosphere packages</span><input type="number" value="8" disabled></label>
+        <label><span>Investigation packages</span><input type="number" value="8" disabled></label>
+        <label><span>Source-video duration</span><select name="master_video_duration_seconds"><option value="5" selected>5 seconds</option><option value="6">6 seconds</option><option value="8">8 seconds</option></select></label>
         <label><span>Language</span><input name="language" value="English"></label>
         <label class="full-span"><span>Tone</span><input name="tone" value="investigative, suspenseful, respectful, technically credible"></label>
         <footer class="modal-footer full-span"><button type="button" class="secondary-button modal-close">Cancel</button><button type="submit" class="primary-button">Create project</button></footer>
       </form>
     </div>
   </div>
-
-  <div class="drawer-backdrop is-hidden" id="asset-drawer" aria-hidden="true">
-    <aside class="asset-drawer-panel" role="dialog" aria-modal="true" aria-label="Asset details">
-      <header class="drawer-header"><div><p class="eyebrow" id="drawer-kicker">Asset</p><h2 id="drawer-title">Asset details</h2></div><button class="icon-button drawer-close" aria-label="Close">×</button></header>
-      <div id="drawer-body" class="drawer-body"></div>
-    </aside>
-  </div>
-
-  <div class="modal-backdrop is-hidden" id="route-modal" aria-hidden="true">
-    <div class="modal-card route-modal-card" role="dialog" aria-modal="true" aria-labelledby="route-modal-title">
-      <header class="modal-header"><div><p class="eyebrow" id="route-modal-kicker">Task routing</p><h2 id="route-modal-title">Configure task</h2></div><button class="icon-button route-modal-close" aria-label="Close">×</button></header>
-      <form id="route-form" class="route-form"></form>
-    </div>
-  </div>
-
+  <div class="drawer-backdrop is-hidden" id="asset-drawer" aria-hidden="true"><aside class="asset-drawer-panel" role="dialog" aria-modal="true" aria-label="Asset details"><header class="drawer-header"><div><p class="eyebrow" id="drawer-kicker">Asset</p><h2 id="drawer-title">Asset details</h2></div><button class="icon-button drawer-close" aria-label="Close">×</button></header><div id="drawer-body" class="drawer-body"></div></aside></div>
+  <div class="modal-backdrop is-hidden" id="route-modal" aria-hidden="true"><div class="modal-card route-modal-card" role="dialog" aria-modal="true" aria-labelledby="route-modal-title"><header class="modal-header"><div><p class="eyebrow" id="route-modal-kicker">Task routing</p><h2 id="route-modal-title">Configure task</h2></div><button class="icon-button route-modal-close" aria-label="Close">×</button></header><form id="route-form" class="route-form"></form></div></div>
   <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
   <script type="module" src="/static/app.js"></script>
 </body>
