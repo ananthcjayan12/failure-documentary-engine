@@ -19,9 +19,10 @@ def test_studio_bootstrap_and_modern_routes(tmp_path: Path):
     assert bootstrap.status_code == 200
     payload = bootstrap.json()
     assert payload["projects"][0]["project_id"] == "demo"
-    assert len(payload["stage_definitions"]) == 8
+    assert len(payload["stage_definitions"]) == 10
     assert [stage["id"] for stage in payload["stage_definitions"]] == [
-        "story_setup", "narration", "voice", "shots", "images", "animatic", "videos", "final_preview",
+        "story_setup", "narration", "voice", "shot_skeleton", "master_footage",
+        "shots", "images", "animatic", "videos", "final_preview",
     ]
 
     project = client.get("/api/projects/demo").json()
@@ -29,6 +30,15 @@ def test_studio_bootstrap_and_modern_routes(tmp_path: Path):
     review_stages = [stage["id"] for stage in project["stages"] if stage["status"] == "review"]
     assert review_stages == ["images"]
     assert project["next_action"]["id"] == "approve_images"
+    assert len(project["master_footage_plan"]["assets"]) == 24
+
+    assets = client.get("/api/projects/demo/assets").json()
+    assert assets["category_counts"] == {
+        "hero": 8,
+        "atmosphere": 8,
+        "investigation": 8,
+    }
+    assert len(assets["assets"]) == 24
 
     assert client.get("/").status_code == 200
     app_js = client.get("/static/app.js")
@@ -37,6 +47,7 @@ def test_studio_bootstrap_and_modern_routes(tmp_path: Path):
     assert "Run this step again" in app_js.text
     assert "Waiting for process output" in app_js.text
     assert "/logs?lines=240" in app_js.text
+    assert "Two-pass provider routing" in app_js.text
 
 
 def test_studio_project_creation_and_settings(tmp_path: Path):
@@ -56,7 +67,16 @@ def test_studio_project_creation_and_settings(tmp_path: Path):
         },
     )
     assert response.status_code == 201
-    assert response.json()["state"] == "PROJECT_CREATED"
+    created = response.json()
+    assert created["state"] == "PROJECT_CREATED"
+    assert created["brief"]["master_footage_strategy"] == {
+        "hero_count": 8,
+        "atmosphere_count": 8,
+        "investigation_count": 8,
+        "source_video_duration_seconds": 5.0,
+        "enforce_exact_counts": True,
+        "target_generated_video_count": 24,
+    }
 
 
 def test_studio_background_job_is_resumable(tmp_path: Path):
@@ -102,8 +122,25 @@ def test_studio_can_restart_any_completed_stage_without_deleting_history(tmp_pat
     assert archived.read_text(encoding="utf-8") == "preserve me"
     assert (project_dir / "03_narration/narration.json").exists()
     assert (project_dir / "04_voice/voiceover_master.wav").exists()
-    assert (project_dir / "06_shots/shot_plan.json").exists()
+    assert (project_dir / "06_shots/editorial_shot_plan.json").exists()
+    assert (project_dir / "05_master_assets/approved_master_footage_plan.json").exists()
     assert client.get("/api/projects/restart-demo").json()["state"] == "SHOTS_APPROVED"
+
+
+def test_studio_can_restart_master_plan_without_losing_voice_or_skeleton(tmp_path: Path):
+    store = ProjectStore(tmp_path / "projects")
+    project_dir = create_demo(store, "master-restart")
+    client = TestClient(create_app(store.workspace))
+    response = client.post(
+        "/api/projects/master-restart/actions/restart_master_footage",
+        json={},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["restart"]["reset_state"] == "SHOT_SKELETON_APPROVED"
+    assert (project_dir / "04_voice/voiceover_master.wav").exists()
+    assert (project_dir / "06_shots/shot_skeleton.json").exists()
+    assert not (project_dir / "05_master_assets/approved_master_footage_plan.json").exists()
 
 
 def test_studio_rejects_project_path_traversal(tmp_path: Path):
@@ -115,14 +152,16 @@ def test_studio_rejects_project_path_traversal(tmp_path: Path):
 def test_orchestrator_routes_profiles_and_prompt_packs(tmp_path: Path):
     client = TestClient(create_app(tmp_path / "projects"))
     payload = client.get("/api/orchestrator").json()
-    assert len(payload["tasks"]) == 10
+    assert len(payload["tasks"]) == 11
     assert [item["id"] for item in payload["tasks"]] == [
         "research", "structure", "narration_writer", "voice_generator", "word_alignment",
-        "shot_planner", "image_generator", "animatic_renderer", "video_generator", "final_renderer",
+        "master_footage_planner", "editorial_director", "image_generator",
+        "animatic_renderer", "video_generator", "final_renderer",
     ]
     assert payload["active_profile"] == "highest_quality"
     assert payload["active_prompt_pack"] == "aviation_investigation"
     assert payload["docs_checked_at"] == "2026-07-23"
+    assert not any(item["id"] == "shot_planner" for item in payload["tasks"])
 
     changed = client.patch(
         "/api/orchestrator",
