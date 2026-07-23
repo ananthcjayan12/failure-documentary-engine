@@ -22,6 +22,7 @@ _base.ACTION_COMMANDS["shots"] = ["shot-skeleton", "{project}"]
 
 _base.ACTION_TASKS.update(
     {
+        "generate_timing": "word_alignment",
         "shot_skeleton": "word_alignment",
         "shots": "word_alignment",
         "master_footage": "master_footage_planner",
