@@ -121,7 +121,7 @@ class JobManager:
         data = path.read_text(encoding="utf-8", errors="replace").splitlines()
         return "\n".join(data[-max(1, min(lines, 1000)):])
 
-    def start(self, project_id: str, action: str, *, agent: str | None = None) -> dict[str, Any]:
+    def start(self, project_id: str, action: str, *, agent: str | None = None, asset_id: str | None = None, force: bool = False) -> dict[str, Any]:
         restart_request = _restart_request(action)
         if not restart_request and action not in ACTION_COMMANDS:
             raise ValueError(f"Unknown action: {action}")
@@ -171,6 +171,10 @@ class JobManager:
             else:
                 selected_agent = config.get("agent_mode", "manual")
             command_parts = [part.format(project=project_id, agent=selected_agent) for part in command_template]
+            if asset_id and action in {"generate_images", "generate_videos"}:
+                command_parts.extend(["--asset-ids", asset_id])
+                if force:
+                    command_parts.append("--force")
             if action == "generate_voice":
                 voice_provider = _voice_provider(route, config)
                 if voice_provider == "manual":
@@ -195,6 +199,14 @@ class JobManager:
                 env["FDE_LLM_FALLBACK_MODEL"] = str(route.get("fallback_model", ""))
                 env["FDE_LLM_FALLBACK_PROVIDER"] = str(route.get("fallback_provider", ""))
                 env["FDE_LLM_FALLBACK_ADAPTER"] = str(route.get("fallback_provider_adapter", ""))
+                if task_id == "master_footage_planner":
+                    # Master planning is intentionally Claude-only.  The compact
+                    # workflow avoids Claude's large-grammar limit without a
+                    # provider fallback.
+                    env["FDE_LLM_FALLBACK_COMMAND"] = ""
+                    env["FDE_LLM_FALLBACK_MODEL"] = ""
+                    env["FDE_LLM_FALLBACK_PROVIDER"] = ""
+                    env["FDE_LLM_FALLBACK_ADAPTER"] = ""
                 env["FDE_PROMPT_PACK_ID"] = str(route.get("prompt_pack_id", ""))
                 env["FDE_PROMPT_PACK_INSTRUCTIONS"] = str(route.get("prompt_pack_instructions", ""))
                 env["FDE_PROVIDER_ADAPTER"] = str(route.get("provider_adapter", ""))

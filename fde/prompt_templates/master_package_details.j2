@@ -1,6 +1,6 @@
 You are detailing one category of an already approved documentary visual vocabulary.
 
-Return strict JSON only matching MasterPackageDetailBatch. No markdown, commentary, error object, shot plan, image prompt or video prompt.
+Return strict JSON only matching the compact Claude detail contract. No markdown, commentary, error object, shot plan, image prompt or video prompt.
 
 CATEGORY TO DETAIL:
 {{ category }}
@@ -27,16 +27,17 @@ SOURCE-VIDEO STRATEGY:
 TASK:
 Return detailed specifications for exactly the requested eight package IDs, in the same order. Expand the approved concept; do not redesign the global vocabulary.
 
-For every package return:
+Factual claim IDs are immutable approved-outline metadata and are added locally.
+Do not return a factual_scope field or restate claim wording.
+
+For every package return only these concise fields:
 - visual_concept;
-- factual_scope limited to the package's approved claim IDs;
 - composition and continuity requirements;
-- subject identity and geometry requirements;
+- subject requirements covering identity and geometry;
 - prohibited details;
-- at least two named crop regions;
+- at least two concise crop region descriptions;
 - overlay-safe zones;
 - supported overlay families where relevant;
-- loop, camera, opening-frame, ending-frame and playback constraints;
 - reconstruction disclosure requirement when appropriate.
 
 CATEGORY RULES:

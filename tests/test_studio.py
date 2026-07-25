@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from fde.demo import create_demo
 from fde.project import ProjectStore
+from fde.studio.jobs import ACTION_COMMANDS
 from fde.studio.server import create_app
 
 
@@ -141,6 +142,12 @@ def test_studio_can_restart_master_plan_without_losing_voice_or_skeleton(tmp_pat
     assert (project_dir / "04_voice/voiceover_master.wav").exists()
     assert (project_dir / "06_shots/shot_skeleton.json").exists()
     assert not (project_dir / "05_master_assets/approved_master_footage_plan.json").exists()
+
+
+def test_studio_master_footage_action_resumes_partial_package_work():
+    assert ACTION_COMMANDS["master_footage"] == [
+        "master-footage", "{project}", "--agent", "{agent}", "--consume-response"
+    ]
 
 
 def test_studio_rejects_project_path_traversal(tmp_path: Path):

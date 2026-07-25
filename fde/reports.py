@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .models import DocumentaryScript, DocumentaryStructure, ResearchDossier, ShotPlan
+from .models import DocumentaryScript, DocumentaryStructure, ResearchDossier, ShotSkeletonPlan
 
 
 def research_markdown(dossier: ResearchDossier) -> str:
@@ -46,11 +46,11 @@ def script_markdown(script: DocumentaryScript) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def shots_markdown(plan: ShotPlan) -> str:
-    lines = [f"# Shot Plan — {plan.project_id}", "", "| Shot | Time | Chapter | Type | Visual | Motion |", "|---|---:|---|---|---|---|"]
+def shots_markdown(plan: ShotSkeletonPlan) -> str:
+    lines = [f"# Shot Skeleton — {plan.project_id}", "", "| Shot | Time | Chapter | Story function | Visual purpose |", "|---|---:|---|---|---|"]
     for shot in plan.shots:
         lines.append(
             f"| {shot.shot_id} | {shot.start:.1f}–{shot.start + shot.duration:.1f}s | {shot.chapter_id} | "
-            f"{shot.visual_type} | {shot.suggested_visual} | {shot.motion} |"
+            f"{shot.story_function} | {shot.visual_purpose} |"
         )
     return "\n".join(lines).rstrip() + "\n"

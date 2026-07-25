@@ -6,8 +6,6 @@ from .io import load_model, write_json
 from .models import (
     AudioTiming,
     DocumentaryScript,
-    Shot,
-    ShotPlan,
     ShotSkeleton,
     ShotSkeletonPlan,
 )
@@ -137,46 +135,4 @@ def plan_shot_skeleton(
     root = project_dir / "06_shots"
     write_json(root / "shot_skeleton.json", plan)
 
-    # Compatibility mirror. Prompts remain blank by design.
-    legacy = ShotPlan(
-        project_id=plan.project_id,
-        total_seconds=plan.total_seconds,
-        voiceover_sha256=plan.voiceover_sha256,
-        shots=[
-            Shot(
-                shot_id=item.shot_id,
-                chapter_id=item.chapter_id,
-                narration_ids=item.narration_ids,
-                claim_ids=item.claim_ids,
-                start=item.start,
-                end=item.end,
-                duration=item.duration,
-                narration_text=item.narration_text,
-                visual_purpose=item.visual_purpose,
-                story_function=item.story_function,
-                factual_scope=item.factual_scope,
-                visual_type="unassigned",
-                requires_new_master_asset=False,
-            )
-            for item in plan.shots
-        ],
-    )
-    write_json(root / "shot_plan.json", legacy)
-    write_json(project_dir / "04_shot_plan/shot_plan.json", legacy)
     return plan
-
-
-# Backwards-compatible name used by earlier callers.
-def plan_shots(
-    project_dir: Path,
-    *,
-    minimum: float = 3.0,
-    target: float = 6.0,
-    maximum: float = 10.0,
-) -> ShotSkeletonPlan:
-    return plan_shot_skeleton(
-        project_dir,
-        minimum=minimum,
-        target=target,
-        maximum=maximum,
-    )

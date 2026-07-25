@@ -136,6 +136,8 @@ NEW_ROUTES["master_footage_planner"].update(
         "model": "claude-sonnet-5",
         "reasoning_effort": "high",
         "temperature": 0.25,
+        "fallback_provider": "",
+        "fallback_model": "",
     }
 )
 NEW_ROUTES["editorial_director"] = copy.deepcopy(old_shot_route)
@@ -185,7 +187,7 @@ for profile in _base.PROFILES.values():
 # Give the built-in profiles intentional two-pass choices.
 profile_overrides = {
     "balanced": {
-        "master_footage_planner": ("gemini_api", "gemini-3.5-flash", "high"),
+        "master_footage_planner": ("anthropic_api", "claude-sonnet-5", "high"),
         "editorial_director": ("gemini_api", "gemini-3.5-flash", "high"),
     },
     "api_first": {
@@ -193,11 +195,11 @@ profile_overrides = {
         "editorial_director": ("gemini_api", "gemini-3.1-pro-preview", "high"),
     },
     "subscription_cli": {
-        "master_footage_planner": ("gemini_cli", "pro", "high"),
+        "master_footage_planner": ("anthropic_api", "claude-sonnet-5", "high"),
         "editorial_director": ("codex", "gpt-5.6-sol", "high"),
     },
     "fast_low_cost": {
-        "master_footage_planner": ("kimi_api", "kimi-k3", "high"),
+        "master_footage_planner": ("anthropic_api", "claude-sonnet-5", "high"),
         "editorial_director": ("gemini_api", "gemini-3.5-flash-lite", "low"),
     },
 }
@@ -207,7 +209,12 @@ for profile_id, values in profile_overrides.items():
         continue
     for task_id, (provider, model, reasoning) in values.items():
         profile["routes"][task_id].update(
-            {"provider": provider, "model": model, "reasoning_effort": reasoning}
+            {
+                "provider": provider,
+                "model": model,
+                "reasoning_effort": reasoning,
+                **({"fallback_provider": "", "fallback_model": ""} if task_id == "master_footage_planner" else {}),
+            }
         )
 
 # All public helpers execute against the mutated base module globals.

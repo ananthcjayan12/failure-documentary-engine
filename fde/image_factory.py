@@ -14,7 +14,7 @@ from PIL import Image
 from .assets import generate_image_prompts, import_images
 from .constants import DEFAULT_GLOBAL_STYLE
 from .io import load_model, write_json
-from .models import DocumentaryScript, MasterAsset, MasterAssetPlan, ProjectBrief, ShotPlan
+from .models import DocumentaryScript, MasterAsset, MasterAssetPlan, ProjectBrief, ShotSkeletonPlan
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 FACTORY_SCHEMA_VERSION = "1.0"
@@ -25,25 +25,22 @@ def _slug(text: str, max_length: int = 48) -> str:
     return value[:max_length].rstrip("_") or "asset"
 
 
-def _asset_narration(asset: MasterAsset, shot_plan: ShotPlan, script: DocumentaryScript) -> dict[str, Any]:
-    shots = {shot.shot_id: shot for shot in shot_plan.shots}
+def _asset_narration(asset: MasterAsset, skeleton: ShotSkeletonPlan, script: DocumentaryScript) -> dict[str, Any]:
+    shots = {shot.shot_id: shot for shot in skeleton.shots}
     narration = {segment.narration_id: segment for segment in script.segments}
     linked = [shots[shot_id] for shot_id in asset.linked_shots if shot_id in shots]
     narration_ids = list(dict.fromkeys(nid for shot in linked for nid in shot.narration_ids))
     text = " ".join(narration[nid].text for nid in narration_ids if nid in narration)
     start = min((shot.start for shot in linked), default=0.0)
     end = max((shot.start + shot.duration for shot in linked), default=start)
-    cameras = sorted({shot.camera for shot in linked if shot.camera})
-    motions = sorted({shot.motion for shot in linked if shot.motion})
-    overlays = sorted({item for shot in linked for item in shot.overlay_requirements})
+    motions = sorted({shot.story_function for shot in linked if shot.story_function})
     return {
         "narration_ids": narration_ids,
         "narration_text": text,
         "start_seconds": round(start, 2),
         "end_seconds": round(end, 2),
-        "camera_options": cameras,
         "motion_options": motions,
-        "overlay_requirements": overlays,
+        "overlay_requirements": [],
     }
 
 
@@ -136,11 +133,11 @@ def export_image_factory_packet(project_dir: Path, output_dir: Path | None = Non
     brief = load_model(project_dir / "00_input/project_brief.json", ProjectBrief)
     plan_path = project_dir / "05_master_assets/master_assets.json"
     plan = load_model(plan_path, MasterAssetPlan)
-    shot_plan = load_model(project_dir / "04_shot_plan/shot_plan.json", ShotPlan)
-    script = load_model(project_dir / "03_script/script.json", DocumentaryScript)
+    skeleton = load_model(project_dir / "06_shots/shot_skeleton.json", ShotSkeletonPlan)
+    script = load_model(project_dir / "03_narration/narration.json", DocumentaryScript)
 
     if any(not asset.image_prompt for asset in plan.assets):
-        plan = generate_image_prompts(plan, shot_plan)
+        plan = generate_image_prompts(plan)
         write_json(plan_path, plan)
 
     packet_dir = output_dir or project_dir / "07_review/image_factory_packet"
@@ -158,7 +155,7 @@ def export_image_factory_packet(project_dir: Path, output_dir: Path | None = Non
 
     manifest_assets: list[dict[str, Any]] = []
     for asset in plan.assets:
-        info = _asset_narration(asset, shot_plan, script)
+        info = _asset_narration(asset, skeleton, script)
         expected_filename = f"{asset.asset_id}_{_slug(asset.title)}_v01.png"
         manifest_assets.append({
             "asset_id": asset.asset_id,
@@ -359,9 +356,9 @@ def import_image_factory_batch(project_dir: Path, batch_zip: Path, min_width: in
         for source in sorted(temp_dir.rglob("*")):
             if not source.is_file() or source.suffix.lower() not in IMAGE_EXTENSIONS:
                 continue
-            match = re.match(r"(A\d{2,3})", source.name.upper())
+            match = re.match(r"([HLE]\d{2,3})", source.name.upper())
             if not match:
-                skipped.append({"file": source.name, "reason": "filename does not start with an asset ID"})
+                skipped.append({"file": source.name, "reason": "filename does not start with an H##, L##, or E## asset ID"})
                 continue
             asset_id = match.group(1)
             destination = inbox / f"{asset_id}_{_slug(source.stem)}.png"

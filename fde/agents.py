@@ -141,6 +141,8 @@ class RoutedAgent(StructuredAgent):
         atomic_write_text(prompt_path, routed_prompt)
         schema = output_model.model_json_schema()
         write_json(schema_path, schema)
+        if self.consume_response and output_path.exists():
+            return output_model.model_validate(read_json(output_path))
         timeout = max(1, int(float(os.environ.get("FDE_LLM_TIMEOUT", "900") or 900)))
         retries = max(0, int(float(os.environ.get("FDE_LLM_RETRIES", "0") or 0)))
         primary = {
@@ -167,6 +169,10 @@ class RoutedAgent(StructuredAgent):
                     output_path=output_path, schema=schema, output_model=output_model,
                     request_dir=request_dir, timeout=timeout,
                 )
+                # Native API adapters return structured data in memory. Persist
+                # it before model validation so a rejected response can be
+                # inspected or deliberately reused without another API call.
+                write_json(output_path, value)
                 return output_model.model_validate(value)
             except AgentPending:
                 raise

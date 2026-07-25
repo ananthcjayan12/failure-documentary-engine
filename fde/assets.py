@@ -8,7 +8,7 @@ from PIL import Image
 from .constants import DEFAULT_GLOBAL_STYLE
 from .io import load_model, safe_copy, write_json
 from .master_footage import approved_master_plan
-from .models import MasterAsset, MasterAssetPlan, ReviewStatus, ShotPlan
+from .models import MasterAsset, MasterAssetPlan, ReviewStatus
 
 
 def _shared_constraints(asset: MasterAsset) -> str:
@@ -96,21 +96,16 @@ def prompts_for_asset(asset: MasterAsset) -> tuple[str, str]:
         return _atmosphere_prompts(asset)
     if asset.category == "investigation":
         return _investigation_prompts(asset)
-    # Legacy compatibility only.
     return _hero_prompts(asset)
 
 
-def generate_image_prompts(
-    plan: MasterAssetPlan,
-    shot_plan: ShotPlan | None = None,
-) -> MasterAssetPlan:
+def generate_image_prompts(plan: MasterAssetPlan) -> MasterAssetPlan:
     """Create a derived generation plan after the package specification is approved.
 
-    `shot_plan` remains an optional compatibility argument. Prompts are generated from
-    the approved master-package contract, not independent per-shot directions.
+    Prompts are generated from the approved master-package contract, not
+    independent per-shot directions.
     """
-    del shot_plan
-    if plan.status not in {"approved", "legacy"}:
+    if plan.status != "approved":
         raise RuntimeError("master-footage prompts can only be derived after plan approval")
     derived = plan.model_copy(deep=True)
     for asset in derived.assets:
@@ -132,13 +127,15 @@ def build_generation_plan(project_dir: Path) -> MasterAssetPlan:
 
 
 def _asset_id_from_name(name: str) -> str | None:
-    match = re.match(r"([HLE]\d{2,3}|A\d{2,3})", name.upper())
+    match = re.match(r"([HLE]\d{2,3})", name.upper())
     return match.group(1) if match else None
 
 
 def import_images(project_dir: Path, min_width: int = 1280, ratio_tolerance: float = 0.08) -> dict:
-    generation_path = project_dir / "05_master_assets/generation_plan.json"
-    plan_path = generation_path if generation_path.exists() else project_dir / "05_master_assets/master_assets.json"
+    # The approved master plan is the sole authoritative media-state record.
+    # ``generation_plan.json`` is a derived prompt artifact and must never
+    # become a second source of approval/version state.
+    plan_path = project_dir / "05_master_assets/master_assets.json"
     plan = load_model(plan_path, MasterAssetPlan)
     assets = {item.asset_id: item for item in plan.assets}
     inbox = project_dir / "08_generated_images/inbox"

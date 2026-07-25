@@ -37,6 +37,64 @@ NON_GENERATED_MODES = {
     "archive_media",
     "black_or_negative_space",
 }
+EDITORIAL_REUSE_OPERATIONS = {
+    "full_frame",
+    "crop",
+    "loop",
+    "slow",
+    "freeze",
+    "reverse_loop",
+    "overlay_background",
+    "callback",
+    "match_cut",
+}
+ASSET_OPERATION_ALIASES = {
+    # Master-vocabulary models have historically returned capability labels
+    # instead of the canonical EditorialShot reuse-operation tokens.
+    "hero_render": "full_frame",
+    "slow_motion": "slow",
+    "overlay_diagram": "overlay_background",
+}
+
+
+def canonical_asset_operations(operations: list[str]) -> list[str]:
+    """Return the closed editorial vocabulary represented by asset operations."""
+    canonical: list[str] = []
+    for operation in operations:
+        value = ASSET_OPERATION_ALIASES.get(operation, operation)
+        if value in EDITORIAL_REUSE_OPERATIONS and value not in canonical:
+            canonical.append(value)
+    return canonical
+
+
+def editorial_master_contract(master_plan: MasterAssetPlan) -> list[dict[str, object]]:
+    """Build the exact per-asset choices shown to and enforced against the LLM."""
+    return [
+        {
+            "asset_id": asset.asset_id,
+            "linked_shot_ids": list(asset.linked_shots),
+            "allowed_reuse_operations": canonical_asset_operations(
+                asset.allowed_operations
+            ),
+            "allowed_crop_ids": [crop.crop_id for crop in asset.crop_regions],
+            "playback_speed_min": asset.playback_speed_min,
+            "playback_speed_max": asset.playback_speed_max,
+            "source_duration_seconds": asset.source_duration_seconds,
+        }
+        for asset in master_plan.assets
+    ]
+
+
+def _master_plan_for_editorial_prompt(
+    master_plan: MasterAssetPlan,
+) -> MasterAssetPlan:
+    """Expose canonical operation tokens without mutating an approved artifact."""
+    prompt_plan = master_plan.model_copy(deep=True)
+    for asset in prompt_plan.assets:
+        asset.allowed_operations = canonical_asset_operations(
+            asset.allowed_operations
+        )
+    return prompt_plan
 
 
 def _load_script(project: Path) -> DocumentaryScript:
@@ -111,10 +169,12 @@ def validate_editorial_plan(
                     f"{shot.shot_id} is not approved for reuse of {shot.master_asset_id}."
                 )
             operation = "loop" if shot.reuse_operation == "loop_and_slow" else shot.reuse_operation
-            if operation not in asset.allowed_operations:
+            allowed_operations = canonical_asset_operations(asset.allowed_operations)
+            if operation not in allowed_operations:
                 errors.append(
                     f"{shot.shot_id} uses {shot.reuse_operation}, which is not allowed by "
-                    f"{asset.asset_id}."
+                    f"{asset.asset_id}; choose exactly one of "
+                    f"{', '.join(allowed_operations) or '(none)'}."
                 )
             if shot.crop_id and shot.crop_id not in {item.crop_id for item in asset.crop_regions}:
                 errors.append(
@@ -324,7 +384,8 @@ def direct_editorial_shots(
                 research=research,
                 script=script,
                 shot_skeleton=skeleton,
-                master_plan=master_plan,
+                master_plan=_master_plan_for_editorial_prompt(master_plan),
+                editorial_contract=editorial_master_contract(master_plan),
             ),
             output_model=EditorialShotPlan,
             request_dir=project / "_requests",

@@ -162,6 +162,10 @@ def generate_media(
 ) -> dict[str, Any]:
     if media_type not in {"image", "video"}:
         raise ValueError(f"Unsupported Grok media type: {media_type}")
+    if media_type == "video" and float(duration) not in {6.0, 10.0}:
+        raise ValueError(
+            f"Grok image_to_video duration must be 6 or 10 seconds; got {float(duration):g}"
+        )
     extensions = IMAGE_EXTENSIONS if media_type == "image" else VIDEO_EXTENSIONS
     destination.parent.mkdir(parents=True, exist_ok=True)
     start = time.time() - 1

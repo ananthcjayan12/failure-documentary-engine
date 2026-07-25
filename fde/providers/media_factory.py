@@ -10,9 +10,9 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-from ..assets import import_images
+from ..assets import build_generation_plan, import_images
 from ..io import load_model, read_json, write_json
-from ..media import has_command, import_videos
+from ..media import has_command, import_videos, run_command
 from ..models import MasterAssetPlan, ReviewStatus
 from .gemini_api import generate_image as generate_gemini_image
 from .gemini_api import generate_video as generate_gemini_video
@@ -56,6 +56,44 @@ def _mock_video(destination: Path, reference: Path | None, duration: float) -> N
     result = subprocess.run(command, capture_output=True, text=True, timeout=300)
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout)[-3000:])
+
+
+def _local_motion_dimensions(resolution: str, aspect_ratio: str) -> tuple[int, int]:
+    height = int(resolution[:-1]) if resolution.endswith("p") and resolution[:-1].isdigit() else 720
+    ratio_width, ratio_height = (9, 16) if aspect_ratio == "9:16" else (16, 9)
+    width = max(2, round(height * ratio_width / ratio_height / 2) * 2)
+    return width, height
+
+
+def generate_local_motion_video(
+    *, destination: Path, reference: Path | None, duration: float,
+    resolution: str, aspect_ratio: str,
+) -> dict[str, Any]:
+    """Create a review-only, deterministic motion plate without any network call."""
+    if reference is None or not reference.exists():
+        raise RuntimeError("local motion fallback requires an approved reference image")
+    if duration <= 0:
+        raise ValueError("local motion fallback duration must be greater than zero")
+    if not has_command("ffmpeg"):
+        raise RuntimeError("FFmpeg is required for local motion fallback")
+    width, height = _local_motion_dimensions(resolution, aspect_ratio)
+    fps = 24
+    frames = max(1, round(duration * fps))
+    vf = (
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},"
+        f"zoompan=z='min(zoom+0.00035,1.03)':d={frames}:s={width}x{height}:fps={fps}"
+    )
+    run_command([
+        "ffmpeg", "-y", "-loop", "1", "-i", str(reference), "-vf", vf,
+        "-frames:v", str(frames), "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        str(destination),
+    ])
+    return {
+        "provider": "local_motion", "generation_mode": "local_fallback", "network_calls": 0,
+        "path": str(destination), "resolution": resolution, "aspect_ratio": aspect_ratio,
+        "fps": fps, "frame_count": frames,
+    }
 
 
 def _custom_media_command(
@@ -136,6 +174,13 @@ def generate_one(
             "provider": "mock", "model": model, "quality": quality,
             "resolution": resolution, "aspect_ratio": aspect_ratio, "path": str(destination),
         }
+    if provider == "local_motion":
+        if media_type != "video":
+            raise RuntimeError("local_motion supports video only")
+        return generate_local_motion_video(
+            destination=destination, reference=reference, duration=duration,
+            resolution=resolution, aspect_ratio=aspect_ratio,
+        )
     if provider in {"manual_upload"}:
         raise RuntimeError(f"{provider} is a manual handoff provider")
     raise RuntimeError(f"Provider {provider} has no native {media_type} adapter")
@@ -153,6 +198,14 @@ def generate_project_media(
         raise ValueError("media_type must be image or video")
     plan_path = project_dir / "05_master_assets/master_assets.json"
     plan = load_model(plan_path, MasterAssetPlan)
+    if any(not asset.image_prompt or not asset.video_prompt for asset in plan.assets):
+        generated = build_generation_plan(project_dir)
+        generated_by_id = {asset.asset_id: asset for asset in generated.assets}
+        for asset in plan.assets:
+            prompts = generated_by_id[asset.asset_id]
+            asset.image_prompt = prompts.image_prompt
+            asset.video_prompt = prompts.video_prompt
+        write_json(plan_path, plan)
     wanted = set(asset_ids or [])
     root = project_dir / ("08_generated_images" if media_type == "image" else "10_generated_videos")
     generation_root = root / "generation"

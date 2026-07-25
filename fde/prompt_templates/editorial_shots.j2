@@ -14,6 +14,9 @@ IMMUTABLE AUDIO-LED SHOT SKELETON:
 APPROVED MASTER-FOOTAGE PLAN:
 {{ master_plan.model_dump_json(indent=2) }}
 
+STRICT EDITORIAL OPERATION CONTRACT:
+{{ editorial_contract | tojson(indent=2) }}
+
 TASK:
 Construct the editorial shot plan using only the approved master-footage packages and approved non-generated visual modes.
 
@@ -31,12 +34,13 @@ RULES:
 3. Do not merge, split, move, lengthen, or shorten a shot. The approved voiceover is the sole timing authority.
 4. Do not invent additional generated assets or independent per-shot image/video prompts.
 5. A master asset may be selected only for shot IDs listed in that asset's linked_shots.
-6. reuse_operation must be allowed by the selected asset. crop_id must exist on the asset. playback_speed must remain inside its approved range.
-7. source_out cannot exceed the package's configured source duration. Long editorial uses must declare loop, slow, loop_and_slow, freeze, callback, or overlay_background behaviour.
-8. Avoid reverse_loop whenever physical movement, people, machinery, vehicles, smoke, water, or causal action would look incorrect in reverse.
-9. coded_graphic requires a typed OverlaySpec and must not consume a generated-video slot.
-10. archive_media requires an approved archive_source. generated_still and black_or_negative_space must already be approved in non_generated_coverage.
-11. Maps, radar, timelines, transcripts, labels, satellite arcs, and technical diagrams remain deterministic overlays, never text baked into generated media.
-12. Add a visible RECONSTRUCTION disclosure when the approved asset or coverage assignment requires it.
-13. Use callbacks and alternate approved crop regions deliberately; do not make every shot a slow push.
-14. Set master_plan_version to the approved plan version.
+6. `reuse_operation` is a closed-token contract. Copy exactly one token from the selected asset's `allowed_reuse_operations` in STRICT EDITORIAL OPERATION CONTRACT. Never paraphrase, expand, shorten, hyphenate, or invent an operation token.
+7. `crop_id` must be copied exactly from the selected asset's `allowed_crop_ids`. `playback_speed` must remain inside that asset's approved range.
+8. source_out cannot exceed the package's configured source duration. If a longer use cannot be achieved with an operation explicitly allowed for that asset, select another approved asset or treatment; do not invent a synonym.
+9. Avoid reverse_loop whenever physical movement, people, machinery, vehicles, smoke, water, or causal action would look incorrect in reverse.
+10. coded_graphic requires a typed OverlaySpec and must not consume a generated-video slot.
+11. archive_media requires an approved archive_source. generated_still and black_or_negative_space must already be approved in non_generated_coverage.
+12. Maps, radar, timelines, transcripts, labels, satellite arcs, and technical diagrams remain deterministic overlays, never text baked into generated media.
+13. Add a visible RECONSTRUCTION disclosure when the approved asset or coverage assignment requires it.
+14. Use callbacks and alternate approved crop regions deliberately; do not make every shot a slow push.
+15. Set master_plan_version to the approved plan version.

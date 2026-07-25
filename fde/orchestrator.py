@@ -102,7 +102,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
                     "grok-imagine-video": ["480p", "720p"],
                 },
                 "aspect_ratio": ["16:9", "9:16"],
-                "duration_seconds": [5, 6, 8, 10, 12],
+                "duration_seconds": [6, 10],
             },
         },
         integration_notes=(
@@ -527,7 +527,7 @@ DEFAULT_TASK_ROUTES: dict[str, dict[str, Any]] = {
         quality="standard",
         resolution="720p",
         aspect_ratio="16:9",
-        duration_seconds=8,
+        duration_seconds=6,
     ),
     "final_renderer": route(
         "ffmpeg",
@@ -674,7 +674,7 @@ PROFILES["api_first"]["routes"]["video_generator"].update({
     "resolution": "720p", "aspect_ratio": "16:9", "duration_seconds": 8
 })
 PROFILES["fast_low_cost"]["routes"]["image_generator"].update({"resolution": "1K", "quality": "standard"})
-PROFILES["fast_low_cost"]["routes"]["video_generator"].update({"resolution": "480p", "duration_seconds": 5})
+PROFILES["fast_low_cost"]["routes"]["video_generator"].update({"resolution": "480p", "duration_seconds": 6})
 
 DEFAULT_RULES: list[dict[str, Any]] = [
     {
@@ -763,6 +763,15 @@ def _validate_route(task_id: str, route_config: dict[str, Any]) -> None:
         raise ValueError(f"Fallback model {fallback_model} is not verified for {fallback['label']}")
 
 
+def _migrate_legacy_grok_video_duration(task_id: str, route_config: dict[str, Any]) -> None:
+    """Repair only old persisted Grok duration choices that the provider rejects."""
+    if task_id != "video_generator" or route_config.get("provider") != "grok_cli":
+        return
+    duration = float(route_config.get("duration_seconds") or 0)
+    if duration and duration not in {6.0, 10.0}:
+        route_config["duration_seconds"] = 6
+
+
 def merge_orchestrator_config(saved: dict[str, Any] | None) -> dict[str, Any]:
     config = default_orchestrator_config()
     saved = saved or {}
@@ -781,6 +790,7 @@ def merge_orchestrator_config(saved: dict[str, Any] | None) -> dict[str, Any]:
                 continue
             candidate = copy.deepcopy(config["tasks"][task_id])
             candidate.update(values)
+            _migrate_legacy_grok_video_duration(task_id, candidate)
             try:
                 _validate_route(task_id, candidate)
             except ValueError:
