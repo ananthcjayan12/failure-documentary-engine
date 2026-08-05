@@ -7,7 +7,11 @@ from . import jobs as _base
 _base.ACTION_COMMANDS.update(
     {
         "shot_skeleton": ["shot-skeleton", "{project}"],
-        "master_footage": ["master-footage", "{project}", "--agent", "{agent}"],
+        # Safe on a first run (no artifacts exist) and resumes partial work
+        # after a failed package-detail batch instead of spending calls again.
+        "master_footage": [
+            "master-footage", "{project}", "--agent", "{agent}", "--consume-response"
+        ],
         "consume_master_footage": [
             "master-footage", "{project}", "--agent", "manual", "--consume-response"
         ],
@@ -17,14 +21,10 @@ _base.ACTION_COMMANDS.update(
         ],
     }
 )
-# The old `shots` action remains a compatibility alias for the deterministic skeleton.
-_base.ACTION_COMMANDS["shots"] = ["shot-skeleton", "{project}"]
-
 _base.ACTION_TASKS.update(
     {
         "generate_timing": "word_alignment",
         "shot_skeleton": "word_alignment",
-        "shots": "word_alignment",
         "master_footage": "master_footage_planner",
         "editorial_shots": "editorial_director",
         "prepare_images": "image_generator",

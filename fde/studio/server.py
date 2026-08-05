@@ -123,15 +123,11 @@ def create_app(workspace: Path | str = "projects") -> FastAPI:
             "approve_narration": ("narration", ProjectState.NARRATION_APPROVED),
             "approve_script": ("narration", ProjectState.NARRATION_APPROVED),
             "approve_voice": ("voice", ProjectState.VOICE_APPROVED),
-            "approve_shots": ("shots", ProjectState.SHOTS_APPROVED),
         }
         if action in approvals:
             artifact, state = approvals[action]
-            if artifact in {"structure", "narration", "shots"}:
+            if artifact in {"structure", "narration"}:
                 service.store.approve_version(project_id, artifact)
-            if action == "approve_shots":
-                from ..pipeline import generate_master_assets
-                generate_master_assets(service.store, project_id)
             service.store.transition(project_id, state)
             return {"status": "completed", "action": action, "state": state.value}
         payload = payload or {}
@@ -156,6 +152,17 @@ def create_app(workspace: Path | str = "projects") -> FastAPI:
             return {"saved": str(path.relative_to(service.store.project_dir(project_id))), "job": job}
         except (ValueError, FileNotFoundError, json.JSONDecodeError, RuntimeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/projects/{project_id}/assets/{asset_id}/generate")
+    def generate_single_asset(project_id: str, asset_id: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+        _require_project(service, project_id)
+        payload = payload or {}
+        target = str(payload.get("target", "image"))
+        action = "generate_images" if target == "image" else "generate_videos"
+        try:
+            return jobs.start(project_id, action, asset_id=asset_id.upper(), force=payload.get("force", True))
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/api/projects/{project_id}/assets/{asset_id}/review")
     def asset_review(project_id: str, asset_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:

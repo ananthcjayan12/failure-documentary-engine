@@ -5,7 +5,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from .editorial import approve_editorial_shots, direct_editorial_shots
-from .master_footage import approve_master_footage, plan_master_footage
+from .master_footage import approve_master_footage
+from .master_planning import plan_master_footage
 from .models import ProjectBrief, ProjectState
 from .pipeline import (
     generate_research,

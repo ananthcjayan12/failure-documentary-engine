@@ -118,6 +118,27 @@ class MasterPackageDetailBatch(BaseModel):
     packages: list[MasterPackageDetail]
 
 
+class ClaudePackageDetail(BaseModel):
+    """Flat Claude-facing detail contract; rich media fields stay local."""
+
+    asset_id: str
+    visual_concept: str
+    factual_scope: list[str] = Field(default_factory=list)
+    composition_requirements: list[str] = Field(default_factory=list)
+    continuity_requirements: list[str] = Field(default_factory=list)
+    subject_requirements: list[str] = Field(default_factory=list)
+    prohibited_details: list[str] = Field(default_factory=list)
+    crop_regions: list[str] = Field(default_factory=list)
+    overlay_safe_zones: list[str] = Field(default_factory=list)
+    supported_overlay_families: list[str] = Field(default_factory=list)
+    reconstruction_disclosure_required: bool = False
+
+
+class ClaudePackageDetailBatch(BaseModel):
+    category: Literal["hero", "atmosphere", "investigation"]
+    packages: list[ClaudePackageDetail]
+
+
 class AssignmentCandidate(BaseModel):
     asset_id: str
     score: float = Field(ge=0, le=1)

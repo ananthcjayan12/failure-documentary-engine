@@ -5,7 +5,7 @@ from pathlib import Path
 from .agents import get_agent
 from .editorial import direct_editorial_shots
 from .io import load_model, versioned_path, write_json
-from .master_footage import plan_master_footage
+from .master_planning import plan_master_footage
 from .models import (
     AudioManifest,
     AudioTiming,
@@ -15,7 +15,6 @@ from .models import (
     MasterAssetPlan,
     ProjectState,
     ResearchDossier,
-    ShotPlan,
     ShotSkeletonPlan,
 )
 from .narration import clean_spoken_text, generate_voice, performance_tags, validate_tagged_text
@@ -243,9 +242,8 @@ def generate_shot_skeleton_stage(
         versioned_path(project / "06_shots", "shot_skeleton", ".json", version),
         skeleton,
     )
-    legacy = load_model(project / "06_shots/shot_plan.json", ShotPlan)
     (project / "06_shots/shot_skeleton.md").write_text(
-        shots_markdown(legacy),
+        shots_markdown(skeleton),
         encoding="utf-8",
     )
     store.transition(project_id, ProjectState.SHOT_SKELETON_REVIEW)
@@ -273,31 +271,6 @@ def generate_editorial_shots_stage(
     consume_response: bool = False,
 ) -> EditorialShotPlan:
     return direct_editorial_shots(
-        store,
-        project_id,
-        agent_kind=agent_kind,
-        consume_response=consume_response,
-    )
-
-
-# Compatibility aliases.
-def generate_shots(
-    store: ProjectStore,
-    project_id: str,
-    agent_kind: str = "deterministic",
-    consume_response: bool = False,
-) -> ShotSkeletonPlan:
-    del agent_kind, consume_response
-    return generate_shot_skeleton_stage(store, project_id)
-
-
-def generate_master_assets(
-    store: ProjectStore,
-    project_id: str,
-    agent_kind: str = "routed",
-    consume_response: bool = False,
-) -> MasterAssetPlan:
-    return generate_master_footage_stage(
         store,
         project_id,
         agent_kind=agent_kind,

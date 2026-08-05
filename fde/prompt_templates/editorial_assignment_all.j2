@@ -1,0 +1,44 @@
+You are the editorial visual director assigning approved reusable footage to every generated-media shot in one compact batch.
+
+Return strict JSON only matching AssignmentBatch. No markdown, commentary, error object, full timeline, unchanged timing fields, image prompts or video prompts.
+
+BATCH:
+{{ batch_number }} of {{ batch_count }}
+
+APPROVED ASSET REGISTRY FOR THIS BATCH:
+{{ approved_assets | tojson(indent=2) }}
+
+ORDERED COMPACT SHOTS TO ASSIGN:
+[
+{% for item in compact_shots %}{{ item.model_dump_json(indent=2) }}{% if not loop.last %},{% endif %}
+{% endfor %}]
+
+OBJECTIVE ELIGIBILITY SETS:
+[
+{% for item in eligibility %}{{ item.model_dump_json(indent=2) }}{% if not loop.last %},{% endif %}
+{% endfor %}]
+
+PREVIOUS APPROVED ASSIGNMENTS FOR CONTINUITY:
+{{ previous_assignments | tojson(indent=2) }}
+
+NEXT SHOTS FOR LOOKAHEAD ONLY:
+[
+{% for item in lookahead_shots %}{{ item.model_dump_json(indent=2) }}{% if not loop.last %},{% endif %}
+{% endfor %}]
+
+TASK:
+Choose the strongest editorial package, operation and crop for every shot in this batch. Treat the batch as one visual sequence rather than unrelated rows.
+
+RULES:
+1. Return every supplied shot_id exactly once, in the same order, and no other shot IDs.
+2. For each shot, select only an asset_id listed in that shot's eligible_assets. Eligibility is a hard safety boundary, not a recommendation or ranking.
+3. Make the creative decision yourself. Local code has not scored, ranked or preselected a preferred candidate.
+4. Consider narrative meaning, visual clarity, emotional pacing, evidence progression, continuity, deliberate callbacks and adjacent repetition across the whole batch.
+5. Do not automatically prefer the package explicitly linked by the vocabulary outline. It is only one eligible option.
+6. Choose only an allowed reuse_operation and existing crop_id. Keep source ranges and playback speeds inside the approved asset limits.
+7. A five-second source may support a longer edit through an allowed loop, slow, freeze, callback or overlay-background treatment.
+8. Use overlays only when the selected asset supports that overlay family and the spoken beat genuinely requires it.
+9. Preserve factual boundaries. Do not imply unsupported evidence, locations, damage, weather, people, actions or conclusions.
+10. Do not alter timing, narration, claims, chapter, story function or visual need. Do not invent assets or media prompts.
+11. support_reason must explain the editorial choice specifically. confidence must reflect genuine certainty.
+12. Avoid generic repeated choices such as using the same crop or slow push for every shot.

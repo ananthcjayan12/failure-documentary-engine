@@ -4,26 +4,19 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Iterable
 
-from .agents import get_agent
 from .io import load_model, read_json, versioned_path, write_json
 from .models import (
     CoverageAssignment,
     CropRegion,
     DisclosureLabel,
-    DocumentaryScript,
     MasterAsset,
     MasterAssetPlan,
     MasterFootageStrategy,
     ProjectBrief,
     ProjectState,
-    ResearchDossier,
-    Shot,
-    ShotPlan,
-    ShotSkeleton,
     ShotSkeletonPlan,
 )
 from .project import ProjectStore
-from .prompts import render_prompt
 
 
 class MasterPlanValidationError(ValueError):
@@ -395,83 +388,6 @@ def deterministic_master_plan(
     )
 
 
-def _load_script(project: Path) -> DocumentaryScript:
-    path = project / "03_narration/narration.json"
-    if not path.exists():
-        path = project / "03_script/script.json"
-    return load_model(path, DocumentaryScript)
-
-
-def plan_master_footage(
-    store: ProjectStore,
-    project_id: str,
-    *,
-    agent_kind: str = "routed",
-    consume_response: bool = False,
-) -> MasterAssetPlan:
-    project = store.project_dir(project_id)
-    brief = store.brief(project_id)
-    skeleton = load_model(project / "06_shots/shot_skeleton.json", ShotSkeletonPlan)
-    from .models import AudioTiming
-    timing = load_model(project / "05_timing/audio_timing.json", AudioTiming)
-    if skeleton.voiceover_sha256 != timing.voiceover_sha256:
-        raise RuntimeError("shot skeleton does not match the current approved voiceover")
-    version = store.next_version(project_id, "master_footage")
-    store.transition(project_id, ProjectState.MASTER_PLAN_GENERATING)
-    if agent_kind in {"deterministic", "mock"}:
-        proposal = deterministic_master_plan(brief, skeleton)
-    else:
-        research = load_model(project / "01_research/source_dossier.json", ResearchDossier)
-        script = _load_script(project)
-        context = {
-            "project_id": project_id,
-            "title": brief.title,
-            "duration": brief.target_duration_seconds,
-            "research": research,
-            "script": script,
-            "shot_skeleton": skeleton,
-            "master_footage_strategy": brief.master_footage_strategy,
-        }
-        agent = get_agent(agent_kind, context, consume_response)
-        proposal = agent.run(
-            stage="master_footage",
-            prompt=render_prompt(
-                "master_footage",
-                brief=brief,
-                research=research,
-                script=script,
-                shot_skeleton=skeleton,
-                strategy=brief.master_footage_strategy,
-            ),
-            output_model=MasterAssetPlan,
-            request_dir=project / "_requests",
-        )
-    proposal = normalize_master_plan(
-        proposal,
-        brief=brief,
-        skeleton=skeleton,
-        version=version,
-    )
-    try:
-        validate_master_plan(proposal, skeleton, brief)
-    except Exception:
-        store.transition(project_id, ProjectState.SHOT_SKELETON_APPROVED)
-        raise
-    root = project / "05_master_assets"
-    write_json(versioned_path(root, "master_footage_plan", ".json", version), proposal)
-    write_json(root / "master_footage_plan.json", proposal)
-    write_json(root / "validation_report.json", {
-        "valid": True,
-        "version": version,
-        "category_counts": dict(Counter(item.category for item in proposal.assets)),
-        "asset_count": len(proposal.assets),
-        "covered_shots": len(skeleton.shots) - len(proposal.uncovered_shots),
-        "uncovered_shots": proposal.uncovered_shots,
-    })
-    store.transition(project_id, ProjectState.MASTER_PLAN_REVIEW)
-    return proposal
-
-
 def approve_master_footage(store: ProjectStore, project_id: str) -> MasterAssetPlan:
     project = store.project_dir(project_id)
     brief = store.brief(project_id)
@@ -486,7 +402,6 @@ def approve_master_footage(store: ProjectStore, project_id: str) -> MasterAssetP
         approved,
     )
     write_json(project / "05_master_assets/approved_master_footage_plan.json", approved)
-    # Compatibility path now points to the approved package specification, not a semantic cluster.
     write_json(project / "05_master_assets/master_assets.json", approved)
     store.transition(project_id, ProjectState.MASTER_PLAN_APPROVED)
     return approved
@@ -498,65 +413,6 @@ def approved_master_plan(project_dir: Path) -> MasterAssetPlan:
     if not path.exists():
         path = project_dir / "05_master_assets/master_assets.json"
     plan = load_model(path, MasterAssetPlan)
-    if plan.status not in {"approved", "legacy"}:
+    if plan.status != "approved":
         raise RuntimeError("approve the master-footage plan before using it downstream")
     return plan
-
-
-def migrate_legacy_visual_plan(store: ProjectStore, project_id: str) -> MasterAssetPlan:
-    """Create a versioned 24-package proposal without touching legacy media or approvals."""
-    project = store.project_dir(project_id)
-    skeleton_path = project / "06_shots/shot_skeleton.json"
-    if not skeleton_path.exists():
-        legacy_path = project / "06_shots/shot_plan.json"
-        if not legacy_path.exists():
-            legacy_path = project / "04_shot_plan/shot_plan.json"
-        legacy = load_model(legacy_path, ShotPlan)
-        skeleton = ShotSkeletonPlan(
-            project_id=legacy.project_id,
-            total_seconds=legacy.total_seconds,
-            voiceover_sha256=legacy.voiceover_sha256,
-            timing_source="migrated_legacy_audio_led_plan",
-            shots=[
-                ShotSkeleton(
-                    shot_id=item.shot_id,
-                    chapter_id=item.chapter_id,
-                    narration_ids=item.narration_ids,
-                    claim_ids=item.claim_ids,
-                    start=item.start,
-                    end=item.end or item.start + item.duration,
-                    duration=item.duration,
-                    narration_text=item.narration_text,
-                    visual_purpose=item.visual_purpose,
-                    story_function=item.story_function or item.suspense_function,
-                    factual_scope=item.factual_scope or item.claim_ids,
-                )
-                for item in legacy.shots
-            ],
-        )
-        write_json(skeleton_path, skeleton)
-    else:
-        skeleton = load_model(skeleton_path, ShotSkeletonPlan)
-
-    brief = store.brief(project_id)
-    proposal = deterministic_master_plan(brief, skeleton)
-    old_path = project / "05_master_assets/master_assets.json"
-    if old_path.exists():
-        old = read_json(old_path)
-        proposal.migration_notes.append(
-            f"Preserved legacy master-assets artifact with {len(old.get('assets', []))} assets."
-        )
-        proposal.migration_notes.append(
-            "Old visual directions were retained as migration context; ambiguous assignments "
-            "must be reviewed before approval."
-        )
-    version = store.next_version(project_id, "master_footage")
-    proposal = normalize_master_plan(proposal, brief=brief, skeleton=skeleton, version=version)
-    validate_master_plan(proposal, skeleton, brief)
-    write_json(
-        versioned_path(project / "05_master_assets", "master_footage_plan", ".json", version),
-        proposal,
-    )
-    write_json(project / "05_master_assets/master_footage_plan.json", proposal)
-    store.transition(project_id, ProjectState.MASTER_PLAN_REVIEW)
-    return proposal

@@ -12,7 +12,7 @@ from rich.table import Table
 from .agents import AgentPending
 from .editorial import approve_editorial_shots
 from .io import read_json, safe_copy, write_json
-from .master_footage import approve_master_footage, migrate_legacy_visual_plan
+from .master_footage import approve_master_footage
 from .media import has_command
 from .models import MasterFootageStrategy, ProjectBrief, ProjectState
 from .pipeline import (
@@ -30,6 +30,7 @@ from .v1_media import (
     approve_media,
     generate_media_jobs,
     prepare_media_jobs,
+    recover_video_with_local_motion,
     render_animatic,
     render_final_preview,
     transition_after_media,
@@ -168,14 +169,6 @@ def shot_skeleton_cmd(project_id: str, workspace: Path = Path("projects")) -> No
     console.print_json(data=result.model_dump(mode="json"))
 
 
-@app.command()
-def shots(project_id: str, agent: str = "deterministic", consume_response: bool = False,
-          workspace: Path = Path("projects")) -> None:
-    """Compatibility alias: create only the immutable audio-led skeleton."""
-    del agent, consume_response
-    shot_skeleton_cmd(project_id, workspace)
-
-
 @app.command("master-footage")
 def master_footage_cmd(
     project_id: str,
@@ -194,12 +187,6 @@ def editorial_shots_cmd(
     workspace: Path = Path("projects"),
 ) -> None:
     _run_agent(lambda: generate_editorial_shots_stage(store(workspace), project_id, agent, consume_response))
-
-
-@app.command("migrate-master-footage")
-def migrate_master_footage_cmd(project_id: str, workspace: Path = Path("projects")) -> None:
-    result = migrate_legacy_visual_plan(store(workspace), project_id)
-    console.print_json(data=result.model_dump(mode="json"))
 
 
 @app.command("approve-stage")
@@ -316,6 +303,23 @@ def generate_videos(
     console.print_json(data=manifest.model_dump(mode="json"))
 
 
+@app.command("recover-video-local")
+def recover_video_local(
+    project_id: str,
+    asset_id: str,
+    force: bool = typer.Option(False),
+    workspace: Path = Path("projects"),
+) -> None:
+    """Create a review-only local motion fallback without any provider call."""
+    s = store(workspace)
+    manifest = recover_video_with_local_motion(
+        s.project_dir(project_id), asset_id, force=force,
+    )
+    transition_after_media(s, project_id, "video", manifest)
+    console.print("[yellow]Local fallback created with no generation-provider call; manual review is required.[/yellow]")
+    console.print_json(data=manifest.model_dump(mode="json"))
+
+
 @app.command("approve-videos")
 def approve_videos(
     project_id: str,
@@ -419,44 +423,6 @@ def status(project_id: str, workspace: Path = Path("projects")) -> None:
         path = s.project_dir(project_id) / relative
         if path.exists():
             console.print_json(data=read_json(path))
-
-
-@app.command("generate-media")
-def generate_media_compat(
-    project_id: str, media_type: str, asset_ids: str = typer.Option(""),
-    force: bool = typer.Option(False), workspace: Path = Path("projects"),
-) -> None:
-    if media_type == "image":
-        generate_images(project_id, asset_ids, force, workspace)
-    elif media_type == "video":
-        generate_videos(project_id, asset_ids, force, workspace)
-    else:
-        raise typer.BadParameter("media_type must be image or video")
-
-
-@app.command("validate-assets")
-def validate_assets_compat(project_id: str, workspace: Path = Path("projects")) -> None:
-    approve_images(project_id, workspace=workspace)
-
-
-@app.command("video-jobs")
-def video_jobs_compat(project_id: str, workspace: Path = Path("projects")) -> None:
-    prepare_videos(project_id, workspace)
-
-
-@app.command("validate-videos")
-def validate_videos_compat(project_id: str, workspace: Path = Path("projects")) -> None:
-    approve_videos(project_id, workspace=workspace)
-
-
-@app.command("render-preview")
-def render_preview_compat(project_id: str, workspace: Path = Path("projects")) -> None:
-    render_animatic_cmd(project_id, workspace)
-
-
-@app.command("render-final-base")
-def render_final_compat(project_id: str, workspace: Path = Path("projects")) -> None:
-    render_final_preview_cmd(project_id, workspace)
 
 
 @app.command()

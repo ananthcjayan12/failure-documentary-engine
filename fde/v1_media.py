@@ -12,6 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .assets import build_generation_plan
 from .io import load_model, write_json
+from .media import probe_video, run_command
 from .master_footage import approved_master_plan
 from .models import (
     AnimaticManifest,
@@ -31,6 +32,7 @@ from .models import (
 from .project import ProjectStore
 from .providers.media_factory import generate_one
 from .timeline import build_timeline
+from .video_duration import VideoDurationPlan, compile_video_duration
 
 
 def _route_from_env(media_type: str) -> dict[str, Any]:
@@ -218,6 +220,56 @@ def _wanted_assets(
     return selected
 
 
+def _measured_video_duration(path: Path) -> float | None:
+    metadata = probe_video(path)
+    if "warning" in metadata:
+        return None
+    try:
+        return float(metadata.get("format", {}).get("duration", 0))
+    except (TypeError, ValueError):
+        return None
+
+
+def _conform_video_duration(source: Path, destination: Path, duration: float) -> float | None:
+    """Create the candidate used by the edit without discarding the raw provider file."""
+    run_command([
+        "ffmpeg", "-y", "-i", str(source), "-map", "0:v:0", "-t", f"{duration:.6f}",
+        "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(destination),
+    ])
+    return _measured_video_duration(destination)
+
+
+def _preflight_video_jobs(
+    *,
+    project_dir: Path,
+    manifest: V1MediaManifest,
+    assets: dict[str, MasterAsset],
+    wanted: set[str],
+    route: dict[str, Any],
+) -> dict[str, VideoDurationPlan]:
+    """Validate every selected video before changing state or calling a provider."""
+    provider = str(route.get("provider", "mock"))
+    plans: dict[str, VideoDurationPlan] = {}
+    errors: list[str] = []
+    for job in manifest.jobs:
+        asset_id = job.asset_id or job.shot_id
+        if wanted and asset_id not in wanted:
+            continue
+        if asset_id not in assets:
+            errors.append(f"unknown asset {asset_id}")
+            continue
+        if not _image_path(project_dir, asset_id).exists():
+            errors.append(f"{asset_id}: approved master-package image is required")
+            continue
+        try:
+            plans[asset_id] = compile_video_duration(provider, job.duration_seconds)
+        except ValueError as exc:
+            errors.append(f"{asset_id}: {exc}")
+    if errors:
+        raise ValueError("video generation preflight failed: " + "; ".join(errors))
+    return plans
+
+
 def generate_media_jobs(
     project_dir: Path,
     *,
@@ -232,18 +284,23 @@ def generate_media_jobs(
     manifest = prepare_media_jobs(project_dir, media_type, route=route)
     wanted = _wanted_assets(plan, shot_ids)
     assets = {item.asset_id: item for item in plan.assets}
+    duration_plans = (
+        _preflight_video_jobs(
+            project_dir=project_dir,
+            manifest=manifest,
+            assets=assets,
+            wanted=wanted,
+            route=route,
+        )
+        if media_type == "video"
+        else {}
+    )
     for job in manifest.jobs:
         asset_id = job.asset_id or job.shot_id
         if wanted and asset_id not in wanted:
             continue
         output = project_dir / str(job.output)
         if output.exists() and job.status in {"review", "approved"} and not force:
-            continue
-        if media_type == "video" and not _image_path(project_dir, asset_id).exists():
-            job.status = "failed"
-            job.error = "approved master-package image is required before video generation"
-            job.updated_at = utc_now()
-            write_json(_manifest_path(project_dir, media_type), manifest)
             continue
         job.status = "generating"
         job.error = None
@@ -260,14 +317,17 @@ def generate_media_jobs(
                     "path": str(output),
                 }
             else:
-                provider_duration = float(
-                    route.get("duration_seconds") or asset.source_duration_seconds
-                ) if media_type == "video" else 0
+                duration_plan = duration_plans.get(asset_id)
+                provider_duration = duration_plan.provider_duration_seconds if duration_plan else 0
+                raw_output = (
+                    output.parent / "raw" / "provider-output.mp4"
+                    if media_type == "video" else output
+                )
                 record = generate_one(
                     provider=provider,
                     model=str(route.get("model", "")),
                     prompt=job.prompt,
-                    destination=output,
+                    destination=raw_output,
                     media_type=media_type,
                     cwd=project_dir,
                     reference=_image_path(project_dir, asset_id) if media_type == "video" else None,
@@ -278,6 +338,26 @@ def generate_media_jobs(
                     resolution=job.resolution,
                     aspect_ratio=job.aspect_ratio,
                 )
+                if media_type == "video" and duration_plan:
+                    measured_raw = _measured_video_duration(raw_output)
+                    if measured_raw is not None and measured_raw + 0.05 < duration_plan.conform_duration_seconds:
+                        raise RuntimeError(
+                            f"provider output is {measured_raw:.3f}s, shorter than the "
+                            f"{duration_plan.conform_duration_seconds:.3f}s master-asset contract"
+                        )
+                    conformed = _conform_video_duration(
+                        raw_output, output, duration_plan.conform_duration_seconds
+                    )
+                    job.provider_duration_seconds = duration_plan.provider_duration_seconds
+                    job.measured_raw_duration_seconds = measured_raw
+                    job.generation_mode = "provider"
+                    record.update({
+                        "requested_duration_seconds": duration_plan.requested_duration_seconds,
+                        "provider_duration_seconds": duration_plan.provider_duration_seconds,
+                        "measured_raw_duration_seconds": measured_raw,
+                        "conformed_duration_seconds": conformed,
+                        "generation_mode": "provider",
+                    })
             job.status = "review"
             job.error = None
             job.updated_at = utc_now()
@@ -290,11 +370,7 @@ def generate_media_jobs(
                     "linked_shots": asset.linked_shots,
                     "media_type": media_type,
                     "source_duration_seconds": asset.source_duration_seconds,
-                    "provider_duration_seconds": (
-                        float(route.get("duration_seconds") or asset.source_duration_seconds)
-                        if media_type == "video"
-                        else 0
-                    ),
+                    "provider_duration_seconds": job.provider_duration_seconds if media_type == "video" else 0,
                     "provider": route.get("provider"),
                     "model": route.get("model"),
                     "quality": route.get("quality", ""),
@@ -308,6 +384,71 @@ def generate_media_jobs(
             job.error = str(exc)
             job.updated_at = utc_now()
         write_json(_manifest_path(project_dir, media_type), manifest)
+    return manifest
+
+
+def recover_video_with_local_motion(
+    project_dir: Path,
+    asset_id: str,
+    *,
+    force: bool = False,
+) -> V1MediaManifest:
+    """Recover one failed video as a review-only local motion plate.
+
+    This route intentionally does not resolve an Orchestrator route and cannot
+    invoke an external generation provider.
+    """
+    project_dir = Path(project_dir)
+    asset_id = asset_id.upper()
+    path = _manifest_path(project_dir, "video")
+    manifest = load_model(path, V1MediaManifest)
+    matches = [item for item in manifest.jobs if (item.asset_id or item.shot_id) == asset_id]
+    if len(matches) != 1:
+        raise ValueError(f"expected one video job for {asset_id}; found {len(matches)}")
+    job = matches[0]
+    if job.status == "approved":
+        raise RuntimeError(f"cannot replace approved video {asset_id}; create a new version instead")
+    output = project_dir / str(job.output)
+    if output.exists() and not force:
+        raise RuntimeError(f"local fallback output already exists for {asset_id}; use force to replace this candidate")
+    reference = _image_path(project_dir, asset_id)
+    if not reference.exists():
+        raise RuntimeError("approved master-package image is required for local recovery")
+    record = generate_one(
+        provider="local_motion",
+        model="FFmpeg deterministic motion plate",
+        prompt=job.prompt,
+        destination=output,
+        media_type="video",
+        cwd=project_dir,
+        reference=reference,
+        duration=job.duration_seconds,
+        timeout=0,
+        resolution=job.resolution,
+        aspect_ratio=job.aspect_ratio,
+    )
+    conformed = _measured_video_duration(output)
+    job.status = "review"
+    job.error = "local fallback generated; manual review required"
+    job.provider_duration_seconds = None
+    job.measured_raw_duration_seconds = conformed
+    job.generation_mode = "local_fallback"
+    job.updated_at = utc_now()
+    write_json(
+        output.parent / "generation.json",
+        {
+            **record,
+            "asset_id": asset_id,
+            "media_type": "video",
+            "requested_duration_seconds": job.duration_seconds,
+            "provider_duration_seconds": None,
+            "conformed_duration_seconds": conformed,
+            "generation_mode": "local_fallback",
+            "network_calls": 0,
+            "created_at": utc_now(),
+        },
+    )
+    write_json(path, manifest)
     return manifest
 
 
@@ -342,9 +483,9 @@ def approve_media(
 
 
 def _run(command: list[str], *, timeout: int = 1200) -> None:
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
-    if completed.returncode != 0:
-        raise RuntimeError((completed.stderr or completed.stdout)[-5000:])
+    # Keep all media command execution behind the project command wrapper.
+    del timeout
+    run_command(command)
 
 
 def _voiceover_path(project_dir: Path) -> tuple[Path, AudioManifest]:
@@ -415,7 +556,8 @@ def _image_clip(
     duration = entry.timeline_end - entry.timeline_start
     base = _crop_filter(entry.crop_id, width, height)
     if entry.playback_mode in {"callback", "crop"}:
-        vf = f"{base},zoompan=z='min(zoom+0.00025,1.018)':d=1:s={width}x{height}:fps={fps}"
+        total_frames = max(1, int(round(duration * fps)))
+        vf = f"{base},zoompan=z='min(zoom+0.00025,1.018)':d={total_frames}:s={width}x{height}:fps={fps}"
     else:
         vf = f"{base},fps={fps}"
     _run([

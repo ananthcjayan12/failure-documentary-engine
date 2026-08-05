@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from .io import load_model
-from .models import DocumentaryScript, MasterAssetPlan, ShotPlan
+from .models import DocumentaryScript, MasterAssetPlan, ShotSkeletonPlan
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.ImageFont:
@@ -48,9 +48,9 @@ def generate_contact_sheet(project_dir: Path, width: int = 4096, height: int = 6
     from .models import ProjectBrief
     brief = load_model(brief_path, ProjectBrief)
     plan = load_model(project_dir / "05_master_assets/master_assets.json", MasterAssetPlan)
-    shot_plan = load_model(project_dir / "04_shot_plan/shot_plan.json", ShotPlan)
-    script = load_model(project_dir / "03_script/script.json", DocumentaryScript)
-    shots = {s.shot_id: s for s in shot_plan.shots}
+    skeleton = load_model(project_dir / "06_shots/shot_skeleton.json", ShotSkeletonPlan)
+    script = load_model(project_dir / "03_narration/narration.json", DocumentaryScript)
+    shots = {s.shot_id: s for s in skeleton.shots}
     narration = {n.narration_id: n for n in script.segments}
 
     canvas = Image.new("RGB", (width, height), "#07131c")
@@ -69,7 +69,7 @@ def generate_contact_sheet(project_dir: Path, width: int = 4096, height: int = 6
 
     draw.rectangle((0, 0, width, 300), fill="#0b202d")
     draw.text((180, 70), title_text, font=title_font, fill="#eef6f8")
-    draw.text((184, 210), f"{len(plan.assets)} reusable assets · {len(shot_plan.shots)} shot divisions · target {brief.target_duration_seconds:.0f}s", font=subtitle_font, fill="#d49349")
+    draw.text((184, 210), f"{len(plan.assets)} reusable assets · {len(skeleton.shots)} shot divisions · target {brief.target_duration_seconds:.0f}s", font=subtitle_font, fill="#d49349")
 
     cols, rows = 4, 7
     gap = 26
@@ -137,7 +137,7 @@ def generate_contact_sheet(project_dir: Path, width: int = 4096, height: int = 6
             draw.text((x + 24, text_y), line, font=body_font, fill="#c7d6da")
             text_y += 36
         text_y += 8
-        motion = "; ".join(sorted({s.motion for s in linked_shots if s.motion})) or "Subtle controlled movement"
+        motion = "; ".join(sorted({s.story_function for s in linked_shots if s.story_function})) or "Subtle controlled movement"
         for line in _wrap(draw, "ANIMATION: " + motion, small_font, tile_w - 48, 3):
             draw.text((x + 24, text_y), line, font=small_font, fill="#d49349")
             text_y += 30

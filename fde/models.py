@@ -517,6 +517,9 @@ class V1MediaJob(BaseModel):
     output: str | None = None
     reference: str | None = None
     duration_seconds: float = 0
+    provider_duration_seconds: float | None = None
+    measured_raw_duration_seconds: float | None = None
+    generation_mode: str = "provider"
     resolution: str = "720p"
     aspect_ratio: str = "16:9"
     error: str | None = None
